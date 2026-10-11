@@ -1,0 +1,1533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+<meta name="theme-color" content="#F6F1E8"/>
+<title>Hisaab — who owes whom, at a glance</title>
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: { extend: {
+    colors: {
+      paper:'#F6F1E8', card:'#FCF9F3', ink:'#26221B', muted:'#7D7463', line:'#E6DCC6',
+      rust:{DEFAULT:'#AE4E2E', deep:'#8C3B20', tint:'#F5E3D7'},
+      sage:{DEFAULT:'#48764F', deep:'#35603D', tint:'#E3EEE0'},
+    },
+    fontFamily: {
+      display:['Fraunces','Georgia','serif'],
+      sans:['"Instrument Sans"','ui-sans-serif','sans-serif'],
+    },
+    boxShadow: {
+      soft:'0 1px 2px rgba(38,34,27,.04), 0 10px 30px -12px rgba(38,34,27,.15)',
+      pop:'0 4px 10px rgba(38,34,27,.08), 0 24px 60px -20px rgba(38,34,27,.35)',
+    },
+  }}
+}
+</script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300..700&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+
+<style>
+  *{-webkit-tap-highlight-color:transparent}
+  button{touch-action:manipulation}
+  html{color-scheme:light}
+  ::selection{background:#26221B;color:#F6F1E8}
+  .numtab{font-variant-numeric:tabular-nums lining-nums}
+  .font-display{font-optical-sizing:auto}
+  .lbl{display:block;font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#7D7463;margin-bottom:8px}
+  .inp{width:100%;background:#F6F1E8;border:1px solid #E6DCC6;border-radius:12px;padding:10px 14px;font-size:15px;font-weight:500;outline:none;transition:border-color .2s}
+  .inp:focus{border-color:#26221B}
+  .inp::placeholder{color:#A79D8A}
+
+  @keyframes sheetUp{from{transform:translateY(48px) scale(.98);opacity:0}to{transform:none;opacity:1}}
+  .sheet-in{animation:sheetUp .36s cubic-bezier(.32,.72,.24,1) both}
+  @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+  .backdrop-in{animation:fadeIn .22s ease both}
+  @keyframes draw{to{stroke-dashoffset:0}}
+  .edge-main{stroke-dasharray:640;stroke-dashoffset:640;animation:draw .9s .15s cubic-bezier(.55,.06,.25,1) forwards}
+  @keyframes flow{to{stroke-dashoffset:-48}}
+  @keyframes fadeFlow{from{opacity:0}to{opacity:.85}}
+  .edge-flow{opacity:0;animation:flow 1.4s linear infinite, fadeFlow .6s .9s ease forwards}
+  @keyframes pop{from{transform:scale(.4);opacity:0}to{transform:scale(1);opacity:1}}
+  .node-pop{animation:pop .55s cubic-bezier(.34,1.56,.64,1) both}
+  @keyframes rise{from{transform:translateY(10px);opacity:0}to{transform:none;opacity:1}}
+  .rise{animation:rise .45s cubic-bezier(.22,.9,.3,1) both}
+  @keyframes toastIn{from{transform:translateY(16px);opacity:0}to{transform:none;opacity:1}}
+  .toast-in{animation:toastIn .32s cubic-bezier(.2,1.1,.4,1) both}
+
+  input[type=range]{-webkit-appearance:none;appearance:none;background:transparent;height:20px;cursor:pointer;width:100%}
+  input[type=range]:disabled{opacity:.35;cursor:default}
+  input[type=range]::-webkit-slider-runnable-track{height:3px;border-radius:99px;background:#E2D8C2}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:16px;height:16px;border-radius:50%;background:#26221B;border:2.5px solid #FCF9F3;box-shadow:0 1px 3px rgba(38,34,27,.35);margin-top:-6.5px}
+  input[type=range]::-moz-range-track{height:3px;border-radius:99px;background:#E2D8C2}
+  input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;background:#26221B;border:2.5px solid #FCF9F3;box-shadow:0 1px 3px rgba(38,34,27,.35)}
+
+  @media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+</style>
+
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/htm@3.1.1/dist/htm.umd.js"></script>
+</head>
+
+<body class="bg-paper text-ink font-sans antialiased">
+<div id="root"></div>
+<noscript>Hisaab needs JavaScript to run.</noscript>
+
+<script>
+const { useState, useEffect, useMemo, useRef, useLayoutEffect } = React;
+const html = htm.bind(React.createElement);
+
+/* ---------------- constants & helpers ---------------- */
+
+const KEY = 'hisaab.v2';
+const uid = () => Math.random().toString(36).slice(2, 10);
+const P = d => ({ t:'p', d });
+
+const AV = ['#BF6A50','#5F8A6F','#687FA8','#B08A3E','#8F6B97','#4E8A80','#A85D5D','#7A7A52'];
+
+const CATS = {
+  food:   { label:'Food',   icon:'food',   fg:'#8F6512', tint:'#F2E6C8' },
+  travel: { label:'Travel', icon:'travel', fg:'#2F675E', tint:'#DCEAE4' },
+  stay:   { label:'Stay',   icon:'stay',   fg:'#6C4B75', tint:'#EBE1EF' },
+  misc:   { label:'Misc',   icon:'misc',   fg:'#6B6350', tint:'#EAE3D2' },
+};
+
+const ICONS = {
+  plus:[P('M12 5v14'),P('M5 12h14')],
+  x:[P('M18 6 6 18'),P('M6 6l12 12')],
+  check:[P('M20 6 9 17l-5-5')],
+  left:[P('M15 18l-6-6 6-6')],
+  right:[P('M9 18l6-6-6-6')],
+  down:[P('M6 9l6 6 6-6')],
+  food:[P('M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2'),P('M7 2v20'),P('M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Z'),P('M21 15v7')],
+  travel:[P('M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2Z')],
+  stay:[P('M3 10.5 12 3l9 7.5'),P('M5 9.8V21h14V9.8'),P('M9.5 21v-6.5h5V21')],
+  misc:[P('M12 3.5 13.6 8l4.4 1.6-4.4 1.6L12 15.7l-1.6-4.5L6 9.6 10.4 8 12 3.5Z'),P('M18.5 14.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z')],
+  arrR:[P('M5 12h13'),P('M12 6l6 6-6 6')],
+  arrLR:[P('M8 3 4 7l4 4'),P('M4 7h15'),P('M16 21l4-4-4-4'),P('M20 17H5')],
+  trash:[P('M3 6h18'),P('M8 6V4.5A1.5 1.5 0 0 1 9.5 3h5A1.5 1.5 0 0 1 16 4.5V6'),P('M18.8 6l-.7 12.1a2 2 0 0 1-2 1.9H7.9a2 2 0 0 1-2-1.9L5.2 6'),P('M10 10.5v6'),P('M14 10.5v6')],
+  clock:[P('M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z'),P('M12 7.5V12l3 2')],
+  wallet:[P('M19 7V6a2 2 0 0 0-2-2H5.5A2.5 2.5 0 0 0 3 6.5v11A2.5 2.5 0 0 0 5.5 20H19a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2H5.5'),P('M16.5 13.5h.01')],
+  equal:[P('M5 9.5h14'),P('M5 14.5h14')],
+  slider:[P('M4 21v-5'),P('M4 12V3'),P('M12 21v-9'),P('M12 8V3'),P('M20 21v-3'),P('M20 14V3'),P('M2 16h4'),P('M10 8h4'),P('M18 18h4')],
+  pct:[P('M19 5 5 19'),{t:'c',cx:6.8,cy:6.8,r:2.4},{t:'c',cx:17.2,cy:17.2,r:2.4}],
+  pencil:[P('M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z')],
+  sparkle:[P('M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9Z'),P('M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9Z')],
+  book:[P('M4 19.5A2.5 2.5 0 0 1 6.5 17H20'),P('M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z')],
+  replay:[P('M3 12a9 9 0 1 0 9-9 9.7 9.7 0 0 0-6.74 2.74L3 8'),P('M3 3v5h5')],
+  users:[P('M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2'),{t:'c',cx:9.5,cy:7,r:4},P('M22 21v-2a4 4 0 0 0-3-3.87'),P('M15.5 3.13a4 4 0 0 1 0 7.75')],
+};
+
+function Icon({ name, size=18, sw=2, className='' }) {
+  if (!ICONS[name]) return null;
+  return html`<svg width=${size} height=${size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth=${sw} strokeLinecap="round" strokeLinejoin="round" className=${className} aria-hidden="true">
+    ${ICONS[name].map((s, i) => s.t === 'p'
+      ? html`<path key=${i} d=${s.d}/>`
+      : html`<circle key=${i} cx=${s.cx} cy=${s.cy} r=${s.r}/>`)}
+  </svg>`;
+}
+
+function fmt(n) {
+  const v = Math.round((Number(n) || 0) * 100) / 100;
+  return new Intl.NumberFormat('en-IN', {
+    style:'currency', currency:'INR',
+    minimumFractionDigits: Number.isInteger(v) ? 0 : 2,
+    maximumFractionDigits: 2,
+  }).format(v);
+}
+const round2 = n => Math.round(n * 100) / 100;
+const firstName = n => (n || '?').trim().split(/\s+/)[0];
+
+function equalShares(amount, ids) {
+  const p = Math.round(amount * 100), n = ids.length || 1;
+  const base = Math.floor(p / n), rem = p - base * n;
+  const o = {};
+  ids.forEach((id, i) => { o[id] = (base + (i < rem ? 1 : 0)) / 100; });
+  return o;
+}
+
+function dayLabel(ts) {
+  const d = new Date(ts), t = new Date();
+  const same = (a, b) => a.toDateString() === b.toDateString();
+  if (same(d, t)) return 'Today';
+  if (same(d, new Date(t.getTime() - 864e5))) return 'Yesterday';
+  return d.toLocaleDateString('en-IN', { day:'numeric', month:'short' })
+    + (d.getFullYear() !== t.getFullYear() ? ' ' + d.getFullYear() : '');
+}
+const timeLabel = ts => new Date(ts).toLocaleTimeString('en-IN', { hour:'numeric', minute:'2-digit' });
+
+/* ---------------- money math ---------------- */
+
+function computePairwise(group) {
+  const ids = group.members.map(m => m.id);
+  const Pm = {};
+  ids.forEach(a => { Pm[a] = {}; ids.forEach(b => { if (a !== b) Pm[a][b] = 0; }); });
+  for (const e of group.expenses || []) {
+    if (!Pm[e.payerId]) continue;
+    for (const [uidv, sh] of Object.entries(e.splits || {})) {
+      if (uidv !== e.payerId && Pm[uidv] && Pm[uidv][e.payerId] != null) {
+        Pm[uidv][e.payerId] += Number(sh) || 0;
+      }
+    }
+  }
+  for (const s of group.settlements || []) {
+    if (Pm[s.fromId] && Pm[s.fromId][s.toId] != null) Pm[s.fromId][s.toId] -= s.amount;
+  }
+  const edges = [];
+  ids.forEach(a => ids.forEach(b => {
+    if (a >= b) return;
+    const v = Pm[a][b] - Pm[b][a];
+    if (v > 0.005) edges.push({ from:a, to:b, amount: round2(v) });
+    else if (v < -0.005) edges.push({ from:b, to:a, amount: round2(-v) });
+  }));
+  const net = {};
+  ids.forEach(a => {
+    let s = 0;
+    ids.forEach(b => { if (a !== b) s += (Pm[b][a] || 0) - (Pm[a][b] || 0); });
+    net[a] = round2(s);
+  });
+  return { edges, net };
+}
+
+/* Minimum-cash-flow greedy: repeatedly settle the biggest debtor against the biggest creditor */
+function simplify(net) {
+  const ds = [], cs = [];
+  for (const id in net) {
+    const v = Math.round(net[id] * 100);
+    if (v > 0) cs.push({ id, amt: v });
+    else if (v < 0) ds.push({ id, amt: -v });
+  }
+  ds.sort((a, b) => b.amt - a.amt);
+  cs.sort((a, b) => b.amt - a.amt);
+  const out = [];
+  let i = 0, j = 0;
+  while (i < ds.length && j < cs.length) {
+    const amt = Math.min(ds[i].amt, cs[j].amt);
+    out.push({ from: ds[i].id, to: cs[j].id, amount: amt / 100 });
+    ds[i].amt -= amt; cs[j].amt -= amt;
+    if (!ds[i].amt) i++;
+    if (!cs[j].amt) j++;
+  }
+  return out;
+}
+
+function memberStat(group, id) {
+  let paid = 0, share = 0;
+  for (const e of group.expenses) {
+    if (e.payerId === id) paid += e.amount;
+    share += Number(e.splits && e.splits[id]) || 0;
+  }
+  return { paid, share };
+}
+function groupStats(g) {
+  const total = g.expenses.reduce((s, e) => s + (+e.amount || 0), 0);
+  const { edges } = computePairwise(g);
+  return { total, debts: edges.length };
+}
+
+/* ---------------- seed demo data ---------------- */
+
+function seedGroup() {
+  const now = Date.now(), D = 864e5;
+  const mk = (name, i) => ({ id: uid(), name, color: AV[i % AV.length] });
+  const a = mk('Aisha', 0), r = mk('Rohan', 1), me = mk('Meera', 2), d = mk('Dev', 3);
+  const all = [a.id, r.id, me.id, d.id];
+  return {
+    id: uid(), name: 'Goa Trip', color: '#BF6A50', demo: true, members: [a, r, me, d],
+    expenses: [
+      { id: uid(), desc: 'Beach shack dinner', amount: 3200, payerId: a.id, category: 'food',   splitType: 'equal', date: now - 2.8 * D, splits: equalShares(3200, all) },
+      { id: uid(), desc: 'Scooter rental · 2 days', amount: 1600, payerId: r.id, category: 'travel', splitType: 'custom', date: now - 2.4 * D, splits: { [a.id]: 400, [r.id]: 600, [me.id]: 0, [d.id]: 600 } },
+      { id: uid(), desc: 'Villa · 2 nights', amount: 9000, payerId: me.id, category: 'stay',   splitType: 'pct', date: now - 1.6 * D, splits: { [a.id]: 2250, [r.id]: 2250, [me.id]: 2700, [d.id]: 1800 } },
+      { id: uid(), desc: 'Airport cabs', amount: 1100, payerId: d.id, category: 'travel', splitType: 'equal', date: now - 1.2 * D, splits: equalShares(1100, all) },
+      { id: uid(), desc: 'Breakfast & coffee', amount: 940, payerId: a.id, category: 'food',   splitType: 'equal', date: now - 0.3 * D, splits: equalShares(940, all) },
+    ],
+    settlements: [],
+  };
+}
+const freshDemoDb = () => ({ v: 2, demo: true, tourDone: false, groups: [seedGroup()] });
+
+/* ---------------- tiny hooks ---------------- */
+
+function useCountUp(target, dur = 700) {
+  const [val, setVal] = useState(target);
+  const fromRef = useRef(target);
+  useEffect(() => {
+    const from = fromRef.current, to = target;
+    if (Math.abs(to - from) < 0.5) { fromRef.current = to; setVal(to); return; }
+    let raf; const t0 = performance.now();
+    const tick = t => {
+      const p = Math.min(1, (t - t0) / dur);
+      const e = 1 - Math.pow(1 - p, 3);
+      const v = from + (to - from) * e;
+      fromRef.current = v; setVal(v);
+      if (p < 1) raf = requestAnimationFrame(tick); else fromRef.current = to;
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [target]);
+  return val;
+}
+
+/* ---------------- primitives ---------------- */
+
+function Avatar({ m, size = 36, className = '' }) {
+  return html`<span className=${'inline-flex items-center justify-center rounded-full font-semibold text-[#FCF9F3] select-none shrink-0 ' + className}
+    style=${{ width:size, height:size, background:m.color, fontSize:Math.round(size * .42), boxShadow:'0 0 0 2px #FCF9F3' }}>
+    ${(m.name || '?').trim()[0].toUpperCase()}
+  </span>`;
+}
+
+function AvStack({ members, size = 26, max = 5 }) {
+  const shown = members.slice(0, max);
+  return html`<div className="flex items-center">
+    ${shown.map((m, i) => html`<span key=${m.id} className="relative" style=${{ zIndex: 20 - i, marginLeft: i > 0 ? -size * .3 : 0 }}><${Avatar} m=${m} size=${size}/></span>`)}
+    ${members.length > max && html`<span className="relative rounded-full bg-card border border-line text-muted font-bold flex items-center justify-center"
+      style=${{ width:size, height:size, fontSize:10, zIndex:1, marginLeft:-size * .3 }}>+${members.length - max}</span>`}
+  </div>`;
+}
+
+function Sheet({ title, onClose, children, footer, wide }) {
+  useEffect(() => {
+    const h = e => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', h);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { window.removeEventListener('keydown', h); document.body.style.overflow = prev; };
+  }, []);
+  return html`<div className="fixed inset-0 z-50">
+    <div className="absolute inset-0 bg-ink/40 backdrop-in" onClick=${onClose}></div>
+    <div className="absolute inset-0 flex items-end sm:items-center justify-center pointer-events-none p-0 sm:p-6">
+      <div className=${'pointer-events-auto sheet-in w-full ' + (wide ? 'sm:max-w-lg' : 'sm:max-w-md') +
+        ' bg-card rounded-t-3xl sm:rounded-3xl shadow-pop max-h-[92vh] flex flex-col overflow-hidden'}>
+        <div className="flex items-center justify-between px-5 pt-4 pb-3.5 border-b border-line shrink-0">
+          <h3 className="font-display text-[19px] font-semibold">${title}</h3>
+          <button onClick=${onClose} aria-label="Close" className="p-1.5 -mr-1 rounded-full text-muted hover:bg-paper hover:text-ink transition"><${Icon} name="x" size=${18}/></button>
+        </div>
+        <div className="overflow-y-auto px-5 py-4 flex-1">${children}</div>
+        ${footer}
+      </div>
+    </div>
+  </div>`;
+}
+
+function ToastView({ toast }) {
+  if (!toast) return null;
+  return html`<div key=${toast.key} className="fixed left-1/2 bottom-6 sm:bottom-10 z-[90]" style=${{ transform:'translateX(-50%)' }}>
+    <div className="toast-in flex items-center gap-2.5 bg-ink text-paper rounded-full pl-2 pr-4 py-2 shadow-pop">
+      <span className="w-6 h-6 rounded-full bg-sage flex items-center justify-center shrink-0"><${Icon} name=${toast.icon || 'check'} size=${13} sw=${3} className="text-paper"/></span>
+      <span className="text-[13.5px] font-semibold pr-1">${toast.msg}</span>
+    </div>
+  </div>`;
+}
+
+/* ---------------- guided tour (coach marks) ---------------- */
+
+const TOUR_STEPS = [
+  { target:'tour-graph', title:"The balance graph", body:"Every arrow is a live debt — who owes whom, and how much. A thicker arrow means a bigger amount. Tap any person or arrow to dig in." },
+  { target:'tour-toggle', title:"Direct vs Simplified", body:"\u201CDirect\u201D shows real person-to-person debts. \u201CSimplified\u201D computes the fewest payments that clear everything." },
+  { target:'tour-settle', title:"Settle up in one tap", body:"When someone pays you back, record it — fully or partially. The graph, balances and history update instantly." },
+  { target:'tour-add', title:"Three taps to log an expense", body:"Amount \u2192 who paid \u2192 Add. Equal split is the default; switch to sliders or percentages anytime." },
+  { target:'tour-activity', title:"A story, not a spreadsheet", body:"Expenses and settlements stream in chronologically. Tap any entry to see the exact split — or edit it." },
+  { title:"Make it yours", body:"This demo lives only in your browser. When you\u2019re ready, wipe it and set up your own group — everything is editable: rename, members, expenses, settlements.", final:true },
+];
+
+function Tour({ steps, onFinish, onFinal }) {
+  const [i, setI] = useState(0);
+  const [rect, setRect] = useState(null);
+  const [cardPos, setCardPos] = useState(null);
+  const cardRef = useRef(null);
+  const step = steps[i];
+  const last = i === steps.length - 1;
+
+  const measureNow = () => {
+    const el = step.target ? document.getElementById(step.target) : null;
+    if (!el) { setRect(null); return; }
+    const r = el.getBoundingClientRect();
+    setRect({ top: r.top - 10, left: r.left - 10, width: r.width + 20, height: r.height + 20 });
+  };
+
+  useEffect(() => {
+    const el = step.target ? document.getElementById(step.target) : null;
+    if (!el) { setRect(null); return; }
+    el.scrollIntoView({ block:'center', behavior:'smooth' });
+    const t1 = setTimeout(measureNow, 430);
+    let raf = 0;
+    const onScroll = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(measureNow); };
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', onScroll);
+    return () => { clearTimeout(t1); cancelAnimationFrame(raf); window.removeEventListener('scroll', onScroll, true); window.removeEventListener('resize', onScroll); };
+  }, [i]);
+
+  useLayoutEffect(() => {
+    const c = cardRef.current; if (!c) return;
+    const cr = c.getBoundingClientRect();
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const W = cr.width, H = cr.height;
+    let top, left;
+    if (!rect) { top = (vh - H) / 2; left = (vw - W) / 2; }
+    else {
+      const below = rect.top + rect.height + 14;
+      const above = rect.top - H - 14;
+      top = (below + H < vh - 12) ? below : (above > 12 ? above : Math.max(12, Math.min(vh - H - 12, below)));
+      left = Math.max(12, Math.min(vw - W - 12, rect.left + rect.width / 2 - W / 2));
+    }
+    setCardPos({ top, left });
+  }, [i, rect]);
+
+  useEffect(() => {
+    const h = e => {
+      if (e.key === 'Escape') onFinish();
+      if (e.key === 'ArrowRight') setI(v => Math.min(v + 1, steps.length - 1));
+      if (e.key === 'ArrowLeft') setI(v => Math.max(v - 1, 0));
+    };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, []);
+
+  const next = () => (i < steps.length - 1 ? setI(i + 1) : onFinish());
+
+  return html`<div className="fixed inset-0 z-[80]">
+    ${rect
+      ? html`<div className="absolute pointer-events-none" style=${{
+          top:rect.top, left:rect.left, width:rect.width, height:rect.height, borderRadius:18,
+          boxShadow:'0 0 0 2px rgba(252,249,243,.85), 0 10px 44px rgba(38,34,27,.28), 0 0 0 9999px rgba(38,34,27,.48)',
+          transition:'all .4s cubic-bezier(.22,.9,.3,1)' }}/>`
+      : html`<div className="absolute inset-0 bg-ink/45 backdrop-in"></div>`}
+    <div className="absolute inset-0" onClick=${last ? onFinish : next}></div>
+    <div ref=${cardRef}
+      className="absolute bg-card rounded-2xl shadow-pop border border-line p-4 sm:p-5"
+      style=${{
+        top: cardPos ? cardPos.top : -9999, left: cardPos ? cardPos.left : '50%',
+        width: 'min(92vw, 350px)',
+        opacity: cardPos ? 1 : 0,
+        transition:'top .35s cubic-bezier(.22,.9,.3,1), left .35s cubic-bezier(.22,.9,.3,1), opacity .25s ease' }}>
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[10.5px] font-bold tracking-[.16em] uppercase text-muted">${step.final ? 'Ready?' : (i + 1) + ' of ' + steps.length}</span>
+        ${!last && html`<button onClick=${onFinish} className="text-[12px] font-semibold text-muted hover:text-ink transition">Skip tour</button>`}
+      </div>
+      <h4 className="font-display text-[19px] font-semibold leading-snug">${step.title}</h4>
+      <p className="text-[13.5px] text-muted mt-1.5 leading-relaxed">${step.body}</p>
+      <div className="mt-4 flex items-center gap-2">
+        ${i > 0 && html`<button onClick=${() => setI(i - 1)} className="rounded-full border border-line px-3.5 py-2 text-[13px] font-semibold hover:border-muted transition">Back</button>`}
+        <div className="flex-1"></div>
+        ${last
+          ? html`<button onClick=${onFinish} className="rounded-full border border-line px-3.5 py-2 text-[13px] font-semibold text-muted hover:text-ink hover:border-muted transition">Keep exploring</button>
+             <button onClick=${onFinal} className="inline-flex items-center gap-1.5 rounded-full bg-ink text-paper px-4 py-2 text-[13px] font-semibold hover:bg-ink/90 transition active:scale-95">
+               <${Icon} name="sparkle" size=${14}/> Make your own</button>`
+          : html`<button onClick=${next} className="inline-flex items-center gap-1 rounded-full bg-ink text-paper px-4 py-2 text-[13px] font-semibold hover:bg-ink/90 transition active:scale-95">
+               Next <${Icon} name="right" size=${14} sw=${2.4}/></button>`}
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ---------------- the balance graph (custom SVG) ---------------- */
+
+function edgeGeom(a, b, CX, CY) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const dist = Math.hypot(dx, dy) || 1;
+  const ux = dx / dist, uy = dy / dist;
+  let px = -uy, py = ux;
+  const mx = (a.x + b.x) / 2 - CX, my = (a.y + b.y) / 2 - CY;
+  if (px * mx + py * my < 0) { px = -px; py = -py; }
+  const bow = Math.min(46, dist * 0.18);
+  const s = { x: a.x + ux * (a.r + 6) + px * bow * .4, y: a.y + uy * (a.r + 6) + py * bow * .4 };
+  const e = { x: b.x - ux * (b.r + 14) + px * bow * .4, y: b.y - uy * (b.r + 14) + py * bow * .4 };
+  const c = { x: (a.x + b.x) / 2 + px * bow, y: (a.y + b.y) / 2 + py * bow };
+  const mid = { x: .25 * s.x + .5 * c.x + .25 * e.x, y: .25 * s.y + .5 * c.y + .25 * e.y };
+  const ang = Math.atan2(e.y - c.y, e.x - c.x);
+  return {
+    s, c, e, mid, ang, px, py,
+    d: `M ${s.x.toFixed(1)} ${s.y.toFixed(1)} Q ${c.x.toFixed(1)} ${c.y.toFixed(1)} ${e.x.toFixed(1)} ${e.y.toFixed(1)}`,
+  };
+}
+function qpt(g, t) {
+  const u = 1 - t;
+  return { x: u * u * g.s.x + 2 * u * t * g.c.x + t * t * g.e.x, y: u * u * g.s.y + 2 * u * t * g.c.y + t * t * g.e.y };
+}
+function qdist(g, t, cx, cy) { const p = qpt(g, t); return Math.hypot(p.x - cx, p.y - cy); }
+function arrowPts(g) {
+  const L = 10, Wd = 7;
+  const bx = g.e.x - Math.cos(g.ang) * L, by = g.e.y - Math.sin(g.ang) * L;
+  const nx = -Math.sin(g.ang), ny = Math.cos(g.ang);
+  return `${g.e.x.toFixed(1)},${g.e.y.toFixed(1)} ${(bx + nx * Wd).toFixed(1)},${(by + ny * Wd).toFixed(1)} ${(bx - nx * Wd).toFixed(1)},${(by - ny * Wd).toFixed(1)}`;
+}
+
+function BalanceGraph({ members, edges, simplified, net, total, expenseCount, mode, selected, onNodeClick, onEdgeClick }) {
+  const [hover, setHover] = useState(null);
+  const W = 480, H = 456, CX = 240, CY = 214;
+
+  const layout = useMemo(() => {
+    const n = members.length;
+    const R = n <= 4 ? 150 : n <= 6 ? 136 : 120;
+    const pos = {};
+    members.forEach((m, i) => {
+      const ang = n === 2 ? (i === 0 ? 180 : 0) : -90 + i * 360 / n;
+      const rad = ang * Math.PI / 180;
+      pos[m.id] = { x: CX + R * Math.cos(rad), y: CY + R * Math.sin(rad), r: 27 };
+    });
+    return { pos, R };
+  }, [members]);
+
+  const useEdges = mode === 'direct' ? edges : simplified;
+  const maxAmt = Math.max(1, ...useEdges.map(e => e.amount));
+  const eNodes = useEdges
+    .map(e => ({ ...e, key: e.from + '>' + e.to }))
+    .filter(e => layout.pos[e.from] && layout.pos[e.to]);
+
+  const focusN = (hover && hover.t === 'n') ? hover.id : (selected || null);
+  const focusE = (hover && hover.t === 'e') ? hover.id : null;
+  const edgeDim = e => focusE ? (e.key === focusE ? 1 : .1)
+    : focusN ? ((e.from === focusN || e.to === focusN) ? 1 : .08) : 1;
+  const nodeDim = id => {
+    if (focusE) { const e = eNodes.find(x => x.key === focusE); return e && (e.from === id || e.to === id) ? 1 : .4; }
+    if (focusN) return focusN === id ? 1 : .45;
+    return 1;
+  };
+
+  const settledAll = eNodes.length === 0;
+  const totalAnim = useCountUp(total);
+
+  return html`<div className="px-1 pb-1">
+    <svg viewBox="0 0 480 456" display="block" role="img" aria-label="Balance graph"
+      className="w-full h-auto select-none" style=${{ fontFamily:'"Instrument Sans",sans-serif' }}>
+      <defs>
+        <pattern id="gdots" width="26" height="26" patternUnits="userSpaceOnUse">
+          <circle cx="1.4" cy="1.4" r="1.1" fill="#E7DEC9"/>
+        </pattern>
+      </defs>
+      <rect width="480" height="456" fill="url(#gdots)" opacity=".5"/>
+      <circle cx=${CX} cy=${CY} r=${layout.R} fill="none" stroke="#E3D9C3" strokeWidth="1.2" strokeDasharray="1.5 7.5" strokeLinecap="round"/>
+
+      ${eNodes.map(e => {
+        const a = layout.pos[e.from], b = layout.pos[e.to];
+        const g = edgeGeom(a, b, CX, CY);
+        const w = 2.2 + 4.8 * Math.sqrt(e.amount / maxAmt);
+        const hot = focusE === e.key;
+        const col = hot ? '#8C3B20' : '#AE4E2E';
+        const label = fmt(e.amount);
+        const lw = label.length * 6.8 + 16;
+        const nearC = Math.hypot(g.mid.x - CX, g.mid.y - CY) < 52;
+        const L = nearC ? (qdist(g, .3, CX, CY) > qdist(g, .7, CX, CY) ? qpt(g, .3) : qpt(g, .7)) : g.mid;
+        const lx = L.x + g.px * 15, ly = L.y + g.py * 15;
+        return html`<g key=${mode + e.key} className="cursor-pointer"
+          style=${{ opacity: edgeDim(e), transition:'opacity .25s ease' }}
+          onClick=${ev => { ev.stopPropagation(); onEdgeClick(e); }}
+          onMouseEnter=${() => setHover({ t:'e', id: e.key })}
+          onMouseLeave=${() => setHover(null)}>
+          <path d=${g.d} stroke="#E7DEC9" strokeWidth="1.4" fill="none"/>
+          <path d=${g.d} stroke=${col} fill="none" strokeLinecap="round" className="edge-main"
+            style=${{ strokeWidth: hot ? w + 1.5 : w, transition:'stroke-width .2s ease' }}/>
+          <path d=${g.d} stroke="#F8EEE3" fill="none" strokeLinecap="round" strokeDasharray="2.5 9.5" className="edge-flow"
+            style=${{ strokeWidth: Math.max(1.3, w * .3) }}/>
+          <polygon points=${arrowPts(g)} fill=${col}/>
+          <g style=${{ transform:`translate(${lx}px,${ly}px)`, transition:'transform .6s cubic-bezier(.22,.9,.3,1)' }}>
+            <rect x=${-lw / 2} y=${-11.5} width=${lw} height=${23} rx=${11.5} fill="#26221B" stroke="#FCF9F3" strokeWidth="3"/>
+            <text textAnchor="middle" dominantBaseline="central" fontSize="12.5" fontWeight="600" fill="#F6F1E8" className="numtab">${label}</text>
+          </g>
+          <path d=${g.d} stroke="#FFFFFF" strokeOpacity="0" strokeWidth="26" fill="none"/>
+        </g>`;
+      })}
+
+      ${members.map(m => {
+        const p = layout.pos[m.id]; if (!p) return null;
+        const nv = net[m.id] || 0;
+        const pos_ = nv > 0.005, neg = nv < -0.005;
+        const netTxt = pos_ ? ('+' + fmt(nv)) : neg ? ('−' + fmt(-nv)) : 'settled';
+        const netCol = pos_ ? '#35603D' : neg ? '#8C3B20' : '#8B8271';
+        const sel = selected === m.id;
+        return html`<g key=${m.id} className="cursor-pointer"
+          style=${{ transform:`translate(${p.x}px,${p.y}px)`, transition:'transform .7s cubic-bezier(.22,.9,.3,1), opacity .25s ease', opacity: nodeDim(m.id) }}
+          onClick=${() => onNodeClick(m.id)}
+          onMouseEnter=${() => setHover({ t:'n', id: m.id })}
+          onMouseLeave=${() => setHover(null)}>
+          <g className="node-pop" style=${{ transformBox:'fill-box', transformOrigin:'center' }}>
+            ${sel && html`<circle r="33.5" fill="none" stroke="#26221B" strokeWidth="1.5" strokeDasharray="3 4.5" strokeLinecap="round"/>`}
+            <circle r="27" fill=${m.color} stroke="#FCF9F3" strokeWidth="4"/>
+            <text textAnchor="middle" dominantBaseline="central" fontSize="17" fontWeight="600" fill="#FCF9F3">${(m.name || '?').trim()[0].toUpperCase()}</text>
+            <text y="46" textAnchor="middle" fontSize=${m.name.length > 9 ? 12 : 13.5} fontWeight="600" fill="#26221B">${m.name}</text>
+            <text y="63" textAnchor="middle" fontSize="12" fontWeight="700" fill=${netCol} className="numtab">${netTxt}</text>
+          </g>
+        </g>`;
+      })}
+
+      <g style=${{ pointerEvents:'none' }}>
+        <text x=${CX} y=${CY - 8} textAnchor="middle" fontSize="33" fontWeight="600" fill="#26221B" className="font-display numtab">${fmt(Math.round(totalAnim))}</text>
+        <text x=${CX} y=${CY + 15} textAnchor="middle" fontSize="10" fontWeight="700" letterSpacing="2.2" fill="#8A8171" style=${{ textTransform:'uppercase' }}>Total spent</text>
+        <text x=${CX} y=${CY + 35} textAnchor="middle" fontSize="12" fill="#8A8171">
+          ${expenseCount} expense${expenseCount === 1 ? '' : 's'}${settledAll ? '' : ' · ' + eNodes.length + ' open debt' + (eNodes.length === 1 ? '' : 's')}
+        </text>
+        ${settledAll && html`<g transform=${`translate(${CX} ${CY + 62})`}>
+          <rect x="-78" y="-14" width="156" height="28" rx="14" fill="#E3EEE0" stroke="#FCF9F3" strokeWidth="3"/>
+          <text textAnchor="middle" dominantBaseline="central" fontSize="12" fontWeight="700" fill="#35603D">All settled up</text>
+        </g>`}
+      </g>
+    </svg>
+  </div>`;
+}
+
+/* ---------------- balance tab pieces ---------------- */
+
+function MemberPanel({ group, memberId, edges, net, byId, onClose, onSettle }) {
+  const m = byId[memberId]; if (!m) return null;
+  const { paid, share } = memberStat(group, memberId);
+  const nv = net[memberId] || 0;
+  const owes = edges.filter(e => e.from === memberId);
+  const gets = edges.filter(e => e.to === memberId);
+  const netTxt = nv > 0.005 ? ('is owed ' + fmt(nv)) : nv < -0.005 ? ('owes ' + fmt(-nv)) : 'all settled';
+  const netCls = nv > 0.005 ? 'text-sage-deep' : nv < -0.005 ? 'text-rust-deep' : 'text-muted';
+  return html`<div className="rise mt-3 bg-card border border-line rounded-3xl p-4 sm:p-5 shadow-soft">
+    <div className="flex items-center gap-3">
+      <${Avatar} m=${m} size=${44}/>
+      <div className="flex-1 min-w-0">
+        <div className="font-display text-[19px] font-semibold leading-tight">${m.name}</div>
+        <div className=${'text-[12.5px] font-semibold numtab mt-0.5 ' + netCls}>${netTxt}</div>
+      </div>
+      <button onClick=${onClose} aria-label="Close panel" className="p-1.5 rounded-full text-muted hover:bg-paper hover:text-ink transition"><${Icon} name="x" size=${16}/></button>
+    </div>
+    <div className="mt-3.5 flex divide-x divide-line rounded-2xl border border-line bg-paper overflow-hidden">
+      <div className="flex-1 px-4 py-2.5">
+        <div className="text-[10px] font-bold tracking-[.13em] uppercase text-muted">Paid</div>
+        <div className="font-display text-[17px] font-semibold numtab mt-0.5">${fmt(paid)}</div>
+      </div>
+      <div className="flex-1 px-4 py-2.5">
+        <div className="text-[10px] font-bold tracking-[.13em] uppercase text-muted">Share</div>
+        <div className="font-display text-[17px] font-semibold numtab mt-0.5">${fmt(share)}</div>
+      </div>
+      <div className="flex-1 px-4 py-2.5">
+        <div className="text-[10px] font-bold tracking-[.13em] uppercase text-muted">Net</div>
+        <div className=${'font-display text-[17px] font-semibold numtab mt-0.5 ' + netCls}>${nv > 0.005 ? '+' + fmt(nv) : nv < -0.005 ? '−' + fmt(-nv) : '₹0'}</div>
+      </div>
+    </div>
+    ${(owes.length > 0 || gets.length > 0) && html`<div className="mt-3.5 space-y-1">
+      ${owes.map(e => html`<div key=${'o' + e.to} className="flex items-center gap-2.5 py-1">
+        <${Avatar} m=${byId[e.to]} size=${24}/>
+        <span className="flex-1 text-[13.5px]">owes <span className="font-semibold">${byId[e.to].name}</span></span>
+        <span className="numtab text-[13.5px] font-semibold text-rust-deep">${fmt(e.amount)}</span>
+        <button onClick=${() => onSettle({ from: e.from, to: e.to, amount: e.amount })} className="text-[12px] font-bold rounded-full border border-line px-2.5 py-1 hover:border-ink transition">Settle</button>
+      </div>`)}
+      ${gets.map(e => html`<div key=${'g' + e.from} className="flex items-center gap-2.5 py-1">
+        <${Avatar} m=${byId[e.from]} size=${24}/>
+        <span className="flex-1 text-[13.5px]">is owed by <span className="font-semibold">${byId[e.from].name}</span></span>
+        <span className="numtab text-[13.5px] font-semibold text-sage-deep">${fmt(e.amount)}</span>
+        <button onClick=${() => onSettle({ from: e.from, to: e.to, amount: e.amount })} className="text-[12px] font-bold rounded-full border border-line px-2.5 py-1 hover:border-ink transition">Record</button>
+      </div>`)}
+    </div>`}
+  </div>`;
+}
+
+function SettleSuggestions({ items, byId, onSettle }) {
+  return html`<div>
+    <div className="flex items-baseline justify-between mb-2.5">
+      <h3 className="font-display text-[17px] font-semibold">Settle up</h3>
+      <span className="text-[12.5px] text-muted">${items.length ? `minimum ${items.length} payment${items.length === 1 ? '' : 's'}` : 'nothing to do'}</span>
+    </div>
+    ${items.length === 0 ? html`<div className="flex items-center gap-3 bg-sage-tint border border-sage/25 rounded-2xl px-4 py-3.5">
+        <span className="w-8 h-8 rounded-full bg-sage flex items-center justify-center shrink-0"><${Icon} name="check" size=${16} sw=${3} className="text-paper"/></span>
+        <div>
+          <div className="text-[14px] font-semibold text-sage-deep">Everyone's settled up</div>
+          <div className="text-[12.5px] text-sage-deep/80">No pending payments in this group.</div>
+        </div>
+      </div>`
+    : html`<div className="space-y-2">
+      ${items.map((s, i) => html`<div key=${s.from + s.to} className="rise flex items-center gap-3 bg-card border border-line rounded-2xl px-3.5 py-3" style=${{ animationDelay: (i * 70) + 'ms' }}>
+        <div className="flex items-center shrink-0">
+          <${Avatar} m=${byId[s.from]} size=${32}/>
+          <span className="mx-0.5 text-rust"><${Icon} name="right" size=${15} sw=${2.4}/></span>
+          <${Avatar} m=${byId[s.to]} size=${32}/>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-[14px] font-semibold truncate">${byId[s.from].name} <span className="text-muted font-normal">pays</span> ${byId[s.to].name}</div>
+          <div className="text-[12px] text-muted">one payment clears their balance</div>
+        </div>
+        <div className="font-display text-[17px] font-semibold numtab mr-1 shrink-0">${fmt(s.amount)}</div>
+        <button onClick=${() => onSettle(s)} className="shrink-0 rounded-full bg-ink text-paper text-[12.5px] font-semibold px-3.5 py-2 hover:bg-ink/85 active:scale-95 transition">Settle</button>
+      </div>`)}
+    </div>`}
+  </div>`;
+}
+
+function SettleHistory({ group, byId }) {
+  const [open, setOpen] = useState(group.settlements.length > 0 && group.settlements.length <= 3);
+  const items = [...group.settlements].sort((a, b) => b.date - a.date);
+  return html`<div className="bg-card border border-line rounded-2xl overflow-hidden">
+    <button onClick=${() => setOpen(!open)} className="w-full flex items-center gap-2.5 px-4 py-3 hover:bg-paper/60 transition">
+      <${Icon} name="clock" size=${16} className="text-muted"/>
+      <span className="text-[13.5px] font-semibold flex-1 text-left">Settlement history</span>
+      <span className="text-[12px] text-muted numtab">${items.length}</span>
+      <span className=${'text-muted transition-transform duration-300 ' + (open ? 'rotate-180' : '')}><${Icon} name="down" size=${15}/></span>
+    </button>
+    ${open && (items.length === 0
+      ? html`<p className="text-[13px] text-muted px-4 pb-3.5">No settlements recorded yet.</p>`
+      : html`<div className="px-4 pb-3.5 pt-1 border-t border-line">
+        ${items.map(s => html`<div key=${s.id} className="flex items-center gap-2.5 py-1.5">
+          <span className="w-6 h-6 rounded-full bg-sage-tint text-sage-deep flex items-center justify-center shrink-0"><${Icon} name="check" size=${12} sw=${3}/></span>
+          <div className="flex-1 min-w-0 text-[13.5px] truncate">
+            <span className="font-semibold">${(byId[s.from] || {}).name || '?'}</span> paid <span className="font-semibold">${(byId[s.to] || {}).name || '?'}</span>
+            <span className="text-[12px] text-muted ml-1.5">${dayLabel(s.date)}</span>
+          </div>
+          ${!s.full && html`<span className="text-[10px] font-bold tracking-wide uppercase text-muted border border-line rounded-full px-1.5 py-0.5">partial</span>`}
+          <span className="numtab text-[13.5px] font-semibold text-sage-deep">${fmt(s.amount)}</span>
+        </div>`)}
+      </div>`)}
+  </div>`;
+}
+
+function BalanceTab({ group, edges, net, simplified, total, selected, setSelected, openSettle }) {
+  const [mode, setMode] = useState('direct');
+  const byId = useMemo(() => Object.fromEntries(group.members.map(m => [m.id, m])), [group.members]);
+  return html`<div className="max-w-3xl mx-auto px-4 sm:px-6 pt-5 pb-28">
+    <div id="tour-graph" className="bg-card border border-line rounded-3xl shadow-soft overflow-hidden">
+      <div className="flex items-center justify-between gap-3 px-4 sm:px-5 pt-4 pb-2">
+        <div className="min-w-0">
+          <div className="text-[11px] font-bold tracking-[.16em] uppercase text-muted">Balance graph</div>
+          <div className="text-[12.5px] text-muted mt-0.5 truncate">${mode === 'direct' ? 'Arrows show real debts, person to person' : 'Minimum payments to clear everything'}</div>
+        </div>
+        <div id="tour-toggle" className="flex bg-paper border border-line rounded-full p-0.5 text-[12px] font-semibold shrink-0">
+          ${[['direct','Direct'],['simple','Simplified']].map(([k, l]) => html`<button key=${k} onClick=${() => setMode(k)}
+            className=${'px-3 py-1.5 rounded-full transition ' + (mode === k ? 'bg-ink text-paper' : 'text-muted hover:text-ink')}>${l}</button>`)}
+        </div>
+      </div>
+      <${BalanceGraph} members=${group.members} edges=${edges} simplified=${simplified} net=${net}
+        total=${total} expenseCount=${group.expenses.length} mode=${mode} selected=${selected}
+        onNodeClick=${id => setSelected(selected === id ? null : id)}
+        onEdgeClick=${e => openSettle({ from: e.from, to: e.to, amount: e.amount })}/>
+    </div>
+
+    ${selected && html`<${MemberPanel} key=${selected} group=${group} memberId=${selected} edges=${edges} net=${net}
+      byId=${byId} onClose=${() => setSelected(null)} onSettle=${openSettle}/>`}
+
+    <div className="mt-5"><${SettleSuggestions} items=${simplified} byId=${byId} onSettle=${openSettle}/></div>
+    <div className="mt-4"><${SettleHistory} group=${group} byId=${byId}/></div>
+  </div>`;
+}
+
+/* ---------------- activity tab ---------------- */
+
+function TimelineEntry({ item, byId, isLast, onDelete, onEdit, onDeleteSettlement }) {
+  const [open, setOpen] = useState(false);
+  const [confirm, setConfirm] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(false);
+
+  if (item.k === 's') {
+    const s = item.s;
+    const f = byId[s.from], t = byId[s.to];
+    return html`<div className="flex gap-3">
+      <div className="flex flex-col items-center">
+        <span className="w-9 h-9 rounded-full bg-sage-tint border border-sage/30 text-sage-deep flex items-center justify-center shrink-0"><${Icon} name="check" size=${16} sw=${3}/></span>
+        ${!isLast && html`<span className="w-px flex-1 bg-line my-1.5"></span>`}
+      </div>
+      <div className="flex-1 min-w-0 pb-6">
+        <div className="rounded-2xl border border-dashed border-sage/40 bg-sage-tint/60 px-3.5 py-2.5 flex items-center gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="text-[14px] font-semibold truncate">${(f || {}).name || '?'} → ${(t || {}).name || '?'}</div>
+            <div className="text-[12px] text-sage-deep/80">${s.full ? 'Full settlement' : 'Partial payment'} · ${timeLabel(s.date)}</div>
+          </div>
+          <span className="font-display text-[16.5px] font-semibold numtab text-sage-deep">${fmt(s.amount)}</span>
+          <button onClick=${() => { if (confirmDel) onDeleteSettlement(s.id); else setConfirmDel(true); }} aria-label="Delete settlement"
+            className=${'p-1.5 rounded-full transition shrink-0 ' + (confirmDel ? 'bg-rust text-paper' : 'text-muted hover:text-rust hover:bg-rust-tint')}>
+            <${Icon} name="trash" size=${13}/>
+          </button>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  const e = item.e;
+  const payer = byId[e.payerId];
+  const cat = CATS[e.category] || CATS.misc;
+  const splitTxt = e.splitType === 'equal' ? 'split equally' : e.splitType === 'pct' ? 'split by percentage' : 'custom split';
+  const parts = Object.entries(e.splits || {});
+  return html`<div className="flex gap-3">
+    <div className="flex flex-col items-center">
+      <span className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style=${{ background: cat.tint, color: cat.fg }}><${Icon} name=${cat.icon} size=${16}/></span>
+      ${!isLast && html`<span className="w-px flex-1 bg-line my-1.5"></span>`}
+    </div>
+    <div className="flex-1 min-w-0 pb-6">
+      <div className="cursor-pointer" onClick=${() => { setOpen(!open); setConfirm(false); }}>
+        <div className="flex items-baseline justify-between gap-3">
+          <span className="text-[15px] font-semibold text-ink truncate">${e.desc}</span>
+          <span className="font-display text-[17px] font-semibold numtab shrink-0">${fmt(e.amount)}</span>
+        </div>
+        <div className="text-[12.5px] text-muted mt-0.5 flex items-center gap-1.5 flex-wrap">
+          <span><span className="font-semibold text-ink/70">${(payer || {}).name || '?'}</span> paid</span>
+          <span>· ${splitTxt}</span>
+          <span className="inline-flex items-center px-1.5 rounded-full text-[10.5px] font-bold uppercase tracking-wide" style=${{ background: cat.tint, color: cat.fg }}>${cat.label}</span>
+        </div>
+      </div>
+      ${open && html`<div className="rise mt-2.5">
+        <div className="flex flex-wrap gap-1.5">
+          ${parts.map(([pid, v]) => html`<span key=${pid} className="inline-flex items-center gap-1.5 bg-paper border border-line rounded-full pl-1 pr-2.5 py-0.5">
+            ${byId[pid] && html`<${Avatar} m=${byId[pid]} size=${20}/>`}
+            <span className="text-[12px] font-medium">${firstName(byId[pid] && byId[pid].name)}</span>
+            <span className="text-[12px] font-semibold numtab">${fmt(v)}</span>
+          </span>`)}
+        </div>
+        <div className="mt-2.5 flex items-center gap-2 flex-wrap">
+          <button onClick=${() => onEdit(e)}
+            className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold rounded-full px-3 py-1.5 border border-line text-ink hover:border-ink transition">
+            <${Icon} name="pencil" size=${13}/> Edit
+          </button>
+          <button onClick=${() => { if (confirm) onDelete(e.id); else setConfirm(true); }}
+            className=${'inline-flex items-center gap-1.5 text-[12.5px] font-semibold rounded-full px-3 py-1.5 border transition ' +
+              (confirm ? 'bg-rust-tint text-rust-deep border-rust/40' : 'border-line text-muted hover:text-rust hover:border-rust/40')}>
+            <${Icon} name="trash" size=${13}/> ${confirm ? 'Tap again to delete' : 'Delete'}
+          </button>
+        </div>
+      </div>`}
+    </div>
+  </div>`;
+}
+
+function ActivityTab({ group, byId, onDelete, onEdit, onDeleteSettlement }) {
+  const entries = useMemo(() => [
+    ...group.expenses.map(e => ({ k: 'e', ts: e.date, e })),
+    ...group.settlements.map(s => ({ k: 's', ts: s.date, s })),
+  ].sort((a, b) => b.ts - a.ts), [group]);
+
+  if (entries.length === 0) return html`<div className="max-w-3xl mx-auto px-4 sm:px-6 pt-16 pb-28 text-center">
+    <span className="inline-flex w-14 h-14 rounded-full bg-card border border-line items-center justify-center text-muted"><${Icon} name="wallet" size=${22}/></span>
+    <p className="mt-3 font-display text-lg font-semibold">Nothing yet</p>
+    <p className="text-[13.5px] text-muted mt-1">Expenses and settlements will appear here as a story feed.</p>
+  </div>`;
+
+  const days = [];
+  for (const it of entries) {
+    const lab = dayLabel(it.ts);
+    let d = days.find(x => x.label === lab);
+    if (!d) { d = { label: lab, items: [] }; days.push(d); }
+    d.items.push(it);
+  }
+  const lastId = (entries[entries.length - 1].e || entries[entries.length - 1].s).id;
+
+  return html`<div className="max-w-3xl mx-auto px-4 sm:px-6 pt-5 pb-28">
+    ${days.map(day => html`<div key=${day.label} className="mb-7">
+      <div className="flex items-center gap-3 mb-3.5">
+        <span className="text-[11px] font-bold tracking-[.18em] uppercase text-muted">${day.label}</span>
+        <span className="h-px flex-1 bg-line"></span>
+      </div>
+      ${day.items.map(it => html`<${TimelineEntry} key=${(it.e || it.s).id} item=${it} byId=${byId}
+        isLast=${(it.e || it.s).id === lastId}
+        onDelete=${onDelete} onEdit=${onEdit} onDeleteSettlement=${onDeleteSettlement}/>`)}
+    </div>`)}
+  </div>`;
+}
+
+/* ---------------- sheets ---------------- */
+
+const QUICK = [['Dinner','food'],['Groceries','food'],['Cab','travel'],['Hotel','stay'],['Snacks','food'],['Tickets','misc']];
+
+function AddExpenseSheet({ group, onClose, onSave, initial }) {
+  const members = group.members;
+  const init = initial || null;
+  const [amount, setAmount] = useState(init ? String(init.amount) : '');
+  const [desc, setDesc] = useState(init ? init.desc : '');
+  const [cat, setCat] = useState(init ? init.category : 'food');
+  const [payer, setPayer] = useState(init ? init.payerId : (members[0] ? members[0].id : null));
+  const [mode, setMode] = useState(init ? init.splitType : 'equal');
+  const [incl, setIncl] = useState(() => {
+    const o = {};
+    members.forEach(m => { o[m.id] = init ? Number(init.splits[m.id] || 0) > 0.005 : true; });
+    return o;
+  });
+  const [cvals, setCvals] = useState(() => {
+    const o = {};
+    members.forEach(m => { o[m.id] = init ? String(round2(init.splits[m.id] || 0)) : ''; });
+    return o;
+  });
+  const [pvals, setPvals] = useState(() => {
+    const o = {};
+    if (init) {
+      const ids = members.map(m => m.id);
+      let acc = 0;
+      ids.forEach((id, idx) => {
+        if (idx < ids.length - 1) {
+          const v = Math.round(((init.splits[id] || 0) / init.amount * 100) * 100) / 100;
+          o[id] = String(v); acc += v;
+        }
+      });
+      o[ids[ids.length - 1]] = String(Math.round((100 - acc) * 100) / 100);
+    } else members.forEach(m => { o[m.id] = ''; });
+    return o;
+  });
+
+  const amt = Math.max(0, parseFloat(amount) || 0);
+  const amtP = Math.round(amt * 100);
+  const inclIds = members.filter(m => incl[m.id]).map(m => m.id);
+  const eqShares = equalShares(amt, inclIds);
+  const each = inclIds.length ? amt / inclIds.length : 0;
+
+  const cP = Object.fromEntries(members.map(m => [m.id, Math.round((parseFloat(cvals[m.id]) || 0) * 100)]));
+  const cSum = members.reduce((s, m) => s + cP[m.id], 0);
+  const cRem = amtP - cSum;
+
+  const pN = Object.fromEntries(members.map(m => [m.id, parseFloat(pvals[m.id]) || 0]));
+  const pSum = members.reduce((s, m) => s + pN[m.id], 0);
+  const pOk = Math.abs(pSum - 100) < 0.011;
+  const pPaise = (() => {
+    const o = {}; let acc = 0;
+    members.forEach(m => { const v = Math.round(amtP * pN[m.id] / 100); o[m.id] = v; acc += v; });
+    const diff = amtP - acc;
+    if (diff !== 0) { const f = members.find(m => pN[m.id] > 0) || members[0]; if (f) o[f.id] += diff; }
+    return o;
+  })();
+
+  const valid = amtP > 0 && (mode === 'equal' ? inclIds.length >= 1 : mode === 'custom' ? cRem === 0 : pOk);
+
+  const evenPct = () => {
+    const n = members.length, o = {}; let acc = 0;
+    members.forEach((m, i) => {
+      if (i < n - 1) { const v = Math.round((100 / n) * 10) / 10; o[m.id] = String(v); acc += v; }
+    });
+    o[members[n - 1].id] = String(Math.round((100 - acc) * 10) / 10);
+    setPvals(o);
+  };
+
+  const save = () => {
+    if (!valid) return;
+    const payerId = members.find(m => m.id === payer) ? payer : (members[0] && members[0].id);
+    const splits = mode === 'equal'
+      ? Object.fromEntries(inclIds.map(id => [id, eqShares[id]]))
+      : mode === 'custom'
+        ? Object.fromEntries(members.map(m => [m.id, cP[m.id] / 100]))
+        : Object.fromEntries(members.map(m => [m.id, pPaise[m.id] / 100]));
+    onSave({ desc: desc.trim() || CATS[cat].label, amount: amt, payerId, category: cat, splitType: mode, splits, date: init ? init.date : Date.now() });
+  };
+
+  const payerName = firstName((members.find(m => m.id === payer) || {}).name);
+
+  return html`<${Sheet} title=${init ? 'Edit expense' : 'Add expense'} onClose=${onClose} wide=${true}
+    footer=${html`<div className="px-5 py-3.5 border-t border-line bg-card">
+      <button onClick=${save} disabled=${!valid}
+        className=${'w-full rounded-2xl py-3 text-[15px] font-semibold transition active:scale-[.98] ' +
+          (valid ? 'bg-ink text-paper hover:bg-ink/90' : 'bg-ink/10 text-ink/35 cursor-not-allowed')}>
+        ${init ? 'Save changes' : ('Add expense' + (amtP > 0 ? ' · ' + fmt(amt) : ''))}
+      </button>
+    </div>`}>
+
+    <div className="space-y-5">
+      <div>
+        <div className="flex items-baseline gap-2 border-b-2 border-ink/70 focus-within:border-ink transition pb-1.5">
+          <span className="font-display text-[26px] text-muted">₹</span>
+          <input autoFocus value=${amount} onChange=${e => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
+            inputMode="decimal" placeholder="0"
+            className="flex-1 min-w-0 bg-transparent outline-none font-display text-[36px] font-semibold placeholder:text-ink/20 numtab"/>
+        </div>
+      </div>
+
+      <div>
+        <input value=${desc} onChange=${e => setDesc(e.target.value)} placeholder="What was it for? (optional)"
+          className="inp"/>
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          ${QUICK.map(([d, c]) => html`<button key=${d} onClick=${() => { setDesc(d); setCat(c); }}
+            className=${'text-[12.5px] font-semibold rounded-full px-2.5 py-1 border transition ' +
+              (desc === d ? 'bg-ink text-paper border-ink' : 'border-line text-muted hover:text-ink hover:border-muted')}>${d}</button>`)}
+        </div>
+      </div>
+
+      <div>
+        <label className="lbl">Category</label>
+        <div className="flex gap-2">
+          ${Object.entries(CATS).map(([k, c]) => html`<button key=${k} onClick=${() => setCat(k)}
+            className=${'flex-1 flex flex-col items-center gap-1.5 rounded-2xl border py-2.5 transition ' + (cat === k ? 'border-ink bg-paper' : 'border-line hover:border-muted')}>
+            <span className="w-8 h-8 rounded-full flex items-center justify-center"
+              style=${cat === k ? { background: c.fg, color: '#FCF9F3' } : { background: c.tint, color: c.fg }}><${Icon} name=${c.icon} size=${15}/></span>
+            <span className=${'text-[11px] font-semibold ' + (cat === k ? 'text-ink' : 'text-muted')}>${c.label}</span>
+          </button>`)}
+        </div>
+      </div>
+
+      <div>
+        <label className="lbl">Paid by</label>
+        <div className="flex gap-1 overflow-x-auto pb-1 -mx-1 px-1">
+          ${members.map(m => html`<button key=${m.id} onClick=${() => setPayer(m.id)} className="shrink-0 flex flex-col items-center gap-1 px-1.5 py-1 rounded-xl">
+            <span className=${'rounded-full transition ' + (payer === m.id ? 'ring-2 ring-ink ring-offset-2 ring-offset-card' : 'opacity-80 hover:opacity-100')}>
+              <${Avatar} m=${m} size=${42}/>
+            </span>
+            <span className=${'text-[11.5px] ' + (payer === m.id ? 'font-bold text-ink' : 'text-muted')}>${firstName(m.name)}</span>
+          </button>`)}
+        </div>
+      </div>
+
+      <div>
+        <label className="lbl">Split</label>
+        <div className="flex bg-paper border border-line rounded-full p-0.5 text-[12.5px] font-semibold w-fit">
+          ${[['equal','Equal','equal'],['custom','Custom','slider'],['pct','Percentage','pct']].map(([k, l, ic]) => html`<button key=${k} onClick=${() => setMode(k)}
+            className=${'inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full transition ' + (mode === k ? 'bg-ink text-paper' : 'text-muted hover:text-ink')}>
+            <${Icon} name=${ic} size=${13}/>${l}</button>`)}
+        </div>
+
+        ${mode === 'equal' && html`<div className="mt-3">
+          <div className="flex flex-wrap gap-1.5">
+            ${members.map(m => html`<button key=${m.id}
+              onClick=${() => { const nxt = !incl[m.id]; if (!nxt && inclIds.length <= 1) return; setIncl({ ...incl, [m.id]: nxt }); }}
+              className=${'inline-flex items-center gap-1.5 rounded-full pl-1 pr-3 py-1 border transition ' +
+                (incl[m.id] ? 'bg-ink text-paper border-ink' : 'border-line text-muted bg-paper hover:border-muted')}>
+              <${Avatar} m=${m} size=${22} className=${incl[m.id] ? '' : 'opacity-50 grayscale'}/>
+              <span className="text-[12.5px] font-semibold">${firstName(m.name)}</span>
+              ${incl[m.id] && html`<span className="numtab text-[11.5px] opacity-80">${fmt(eqShares[m.id] || 0)}</span>`}
+            </button>`)}
+          </div>
+          <p className="mt-2.5 text-[13px] text-muted">
+            ${inclIds.length ? html`<span className="numtab font-semibold text-ink">${fmt(each)}</span> each · ${inclIds.length} people` : 'Select at least one person'}
+          </p>
+        </div>`}
+
+        ${mode === 'custom' && html`<div className="mt-3 space-y-3">
+          ${members.map(m => html`<div key=${m.id}>
+            <div className="flex items-center gap-2.5">
+              <${Avatar} m=${m} size=${26}/>
+              <span className="flex-1 text-[13.5px] font-medium truncate">${m.name}</span>
+              <div className="flex items-center gap-1 bg-paper border border-line rounded-lg px-2 py-1 focus-within:border-ink transition">
+                <span className="text-[12px] text-muted">₹</span>
+                <input value=${cvals[m.id]} onChange=${e => setCvals({ ...cvals, [m.id]: e.target.value.replace(/[^0-9.]/g, '') })}
+                  inputMode="decimal" placeholder="0"
+                  className="w-16 bg-transparent outline-none text-right text-[13.5px] font-semibold numtab"/>
+              </div>
+            </div>
+            <input type="range" min="0" max=${Math.max(amt, 0.01)} step="1" disabled=${amt <= 0}
+              value=${Math.min(parseFloat(cvals[m.id]) || 0, amt)}
+              onChange=${e => setCvals({ ...cvals, [m.id]: String(Math.round(Number(e.target.value) * 100) / 100) })}
+              className="mt-1"/>
+          </div>`)}
+          <div className=${'inline-flex items-center gap-1.5 text-[12.5px] font-semibold rounded-full px-3 py-1.5 border ' +
+              (cRem === 0 && cSum > 0 ? 'bg-sage-tint text-sage-deep border-sage/30' : cRem === 0 ? 'bg-paper border-line text-muted' : 'bg-rust-tint text-rust-deep border-rust/30')}>
+            <${Icon} name=${cRem === 0 && cSum > 0 ? 'check' : 'wallet'} size=${13}/>
+            ${cRem === 0 ? (cSum > 0 ? 'Fully assigned' : 'Enter an amount above')
+              : cRem > 0 ? fmt(cRem / 100) + ' left to assign' : fmt(-cRem / 100) + ' over the total'}
+          </div>
+          ${cRem > 0 && html`<button onClick=${() => {
+              const t = members.find(m => m.id === payer) || members[0];
+              const cur = cP[t.id];
+              setCvals({ ...cvals, [t.id]: String(Math.round((cur + cRem)) / 100) });
+            }} className="ml-2 text-[12.5px] font-bold text-ink underline underline-offset-4 decoration-line hover:decoration-ink">
+            Add to ${payerName}
+          </button>`}
+        </div>`}
+
+        ${mode === 'pct' && html`<div className="mt-3 space-y-2.5">
+          <div className="flex justify-end">
+            <button onClick=${evenPct} className="text-[12px] font-bold text-ink underline underline-offset-4 decoration-line hover:decoration-ink">Even %</button>
+          </div>
+          ${members.map(m => html`<div key=${m.id} className="flex items-center gap-2.5">
+            <${Avatar} m=${m} size=${26}/>
+            <span className="flex-1 text-[13.5px] font-medium truncate">${m.name}</span>
+            <div className="flex items-center gap-1 bg-paper border border-line rounded-lg px-2 py-1 focus-within:border-ink transition">
+              <input value=${pvals[m.id]} onChange=${e => setPvals({ ...pvals, [m.id]: e.target.value.replace(/[^0-9.]/g, '') })}
+                inputMode="decimal" placeholder="0"
+                className="w-12 bg-transparent outline-none text-right text-[13.5px] font-semibold numtab"/>
+              <span className="text-[12px] text-muted">%</span>
+            </div>
+            <span className="w-16 text-right text-[13px] numtab text-muted">${fmt(Math.round(pPaise[m.id]) / 100)}</span>
+          </div>`)}
+          <div className=${'inline-flex items-center gap-1.5 text-[12.5px] font-semibold rounded-full px-3 py-1.5 border ' +
+              (pOk ? 'bg-sage-tint text-sage-deep border-sage/30' : 'bg-rust-tint text-rust-deep border-rust/30')}>
+            <${Icon} name=${pOk ? 'check' : 'pct'} size=${13}/>
+            ${pOk ? 'Adds up to 100%' : Math.round(pSum * 10) / 10 + '% — must total 100%'}
+          </div>
+        </div>`}
+      </div>
+    </div>
+  <//>`;
+}
+
+function SettleSheet({ group, edges, prefill, onClose, onSave }) {
+  const members = group.members;
+  const direct = (f, t) => { const e = edges.find(x => x.from === f && x.to === t); return e ? round2(e.amount) : 0; };
+  const [from, setFrom] = useState(prefill && prefill.from ? prefill.from : (members[0] && members[0].id));
+  const [to, setTo] = useState(prefill && prefill.to ? prefill.to : (members.find(m => m.id !== from) || {}).id);
+  const [amount, setAmount] = useState(String((prefill && prefill.amount) || direct(prefill && prefill.from, prefill && prefill.to) || ''));
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) { first.current = false; return; }
+    const d = direct(from, to);
+    setAmount(d ? String(d) : '');
+  }, [from, to]);
+
+  const amt = Math.max(0, parseFloat(amount) || 0);
+  const d = direct(from, to);
+  const valid = from && to && from !== to && amt > 0;
+
+  const memberRow = (label, value, onChange, other) => html`<div>
+    <label className="lbl">${label}</label>
+    <div className="flex flex-wrap gap-1.5">
+      ${members.map(m => html`<button key=${m.id} disabled=${m.id === other} onClick=${() => onChange(m.id)}
+        className=${'inline-flex items-center gap-1.5 rounded-full pl-1 pr-3 py-1 border transition disabled:opacity-30 disabled:cursor-not-allowed ' +
+          (value === m.id ? 'bg-ink text-paper border-ink' : 'bg-paper border-line hover:border-muted')}>
+        <${Avatar} m=${m} size=${24}/>
+        <span className="text-[13px] font-semibold">${firstName(m.name)}</span>
+      </button>`)}
+    </div>
+  </div>`;
+
+  return html`<${Sheet} title="Settle up" onClose=${onClose}
+    footer=${html`<div className="px-5 py-3.5 border-t border-line bg-card">
+      <button disabled=${!valid} onClick=${() => onSave({ fromId: from, toId: to, amount: round2(amt), full: d > 0 && amt >= d - 0.005, date: Date.now() })}
+        className=${'w-full rounded-2xl py-3 text-[15px] font-semibold transition active:scale-[.98] ' +
+          (valid ? 'bg-ink text-paper hover:bg-ink/90' : 'bg-ink/10 text-ink/35 cursor-not-allowed')}>
+        ${amt > 0 ? 'Record payment · ' + fmt(amt) : 'Record payment'}
+      </button>
+      <p className="text-center text-[11.5px] text-muted mt-2">Logs a real-world payment between these two people.</p>
+    </div>`}>
+    <div className="space-y-4">
+      ${memberRow('Who paid', from, setFrom, to)}
+      ${memberRow('Who received it', to, setTo, from)}
+      <div>
+        <label className="lbl">Amount</label>
+        <div className="flex items-baseline gap-2 border-b-2 border-ink/70 focus-within:border-ink pb-1.5">
+          <span className="font-display text-[22px] text-muted">₹</span>
+          <input value=${amount} onChange=${e => setAmount(e.target.value.replace(/[^0-9.]/g, ''))} inputMode="decimal" placeholder="0"
+            className="flex-1 min-w-0 bg-transparent outline-none font-display text-[28px] font-semibold numtab placeholder:text-ink/20"/>
+        </div>
+        <div className="mt-2.5 flex items-center justify-between gap-2 flex-wrap">
+          <p className="text-[12.5px] text-muted">
+            ${d > 0
+              ? (amt > d + 0.005
+                ? html`<span>Owes <span className="font-semibold text-ink numtab">${fmt(d)}</span> directly — the extra adjusts other balances too.</span>`
+                : html`<span>Owes <span className="font-semibold text-ink numtab">${fmt(d)}</span> in total${amt > 0 && amt < d - 0.005 ? ' · leaves ' + fmt(d - amt) : ''} — partial is fine.</span>`)
+              : 'No outstanding debt between them — you can still record a payment.'}
+          </p>
+          ${d > 0 && Math.abs(amt - d) > 0.005 && html`<button onClick=${() => setAmount(String(d))}
+            className="text-[12px] font-bold border border-line rounded-full px-2.5 py-1 hover:border-muted transition">Full ${fmt(d)}</button>`}
+        </div>
+      </div>
+    </div>
+  <//>`;
+}
+
+function MembersSheet({ group, onClose, onAdd, onRemove }) {
+  const [name, setName] = useState('');
+  const refIds = new Set();
+  group.expenses.forEach(e => { refIds.add(e.payerId); Object.keys(e.splits || {}).forEach(k => refIds.add(k)); });
+  group.settlements.forEach(s => { refIds.add(s.fromId); refIds.add(s.toId); });
+  const add = () => {
+    const v = name.trim(); if (!v) return;
+    if (group.members.some(m => m.name.toLowerCase() === v.toLowerCase())) return;
+    onAdd(v); setName('');
+  };
+  return html`<${Sheet} title="Members" onClose=${onClose}>
+    <div className="space-y-1.5">
+      ${group.members.map(m => html`<div key=${m.id} className="flex items-center gap-3 bg-paper border border-line rounded-2xl px-3 py-2.5">
+        <${Avatar} m=${m} size=${34}/>
+        <span className="flex-1 text-[14.5px] font-medium">${m.name}</span>
+        ${refIds.has(m.id)
+          ? html`<span className="text-[11px] text-muted">in transactions</span>`
+          : html`<button onClick=${() => onRemove(m.id)} aria-label="Remove member" className="p-1.5 rounded-full text-muted hover:text-rust hover:bg-rust-tint transition"><${Icon} name="x" size=${15}/></button>`}
+      </div>`)}
+    </div>
+    <div className="mt-4 flex gap-2">
+      <input value=${name} onChange=${e => setName(e.target.value)} onKeyDown=${e => { if (e.key === 'Enter') add(); }}
+        placeholder="Add someone by name" className="inp flex-1"/>
+      <button onClick=${add} className="px-4 rounded-xl bg-ink text-paper text-[13.5px] font-semibold hover:bg-ink/90 transition active:scale-95">Add</button>
+    </div>
+    <p className="mt-2.5 text-[12px] text-muted">New members start with a zero balance and join future splits.</p>
+  <//>`;
+}
+
+function CreateGroupSheet({ onClose, onCreate, onboarding }) {
+  const GC = ['#BF6A50','#3E7B72','#7E5C86','#B98A2F','#5C7396','#48764F'];
+  const [name, setName] = useState('');
+  const [color, setColor] = useState(GC[0]);
+  const [members, setMembers] = useState([]);
+  const [draft, setDraft] = useState('');
+  const ref = useRef(null);
+  const add = () => {
+    const v = draft.trim(); if (!v) return;
+    if (members.some(m => m.name.toLowerCase() === v.toLowerCase())) return;
+    setMembers(ms => [...ms, { id: uid(), name: v, color: AV[ms.length % AV.length] }]);
+    setDraft('');
+    if (ref.current) ref.current.focus();
+  };
+  const can = name.trim().length > 0 && members.length >= 2;
+  return html`<${Sheet} title=${onboarding ? 'Make it yours' : 'New group'} onClose=${onClose}
+    footer=${html`<div className="px-5 py-3.5 border-t border-line bg-card">
+      <button onClick=${() => can && onCreate({ name: name.trim(), color, members })} disabled=${!can}
+        className=${'w-full rounded-2xl py-3 text-[15px] font-semibold transition active:scale-[.98] ' +
+          (can ? 'bg-ink text-paper hover:bg-ink/90' : 'bg-ink/10 text-ink/35 cursor-not-allowed')}>
+        ${onboarding ? 'Create my group' : 'Create group'}
+      </button>
+    </div>`}>
+    ${onboarding && html`<p className="text-[13.5px] text-muted -mt-1 mb-4">Fresh start — everything you build is saved in this browser and fully editable later.</p>`}
+    <div className="space-y-5">
+      <div>
+        <label className="lbl">Group name</label>
+        <input autoFocus value=${name} onChange=${e => setName(e.target.value)} placeholder="Goa Trip, Flat 3B…" className="inp"/>
+      </div>
+      <div>
+        <label className="lbl">Accent</label>
+        <div className="flex gap-2.5">
+          ${GC.map(c => html`<button key=${c} onClick=${() => setColor(c)} aria-label=${'Accent ' + c}
+            className=${'w-8 h-8 rounded-full transition ' + (color === c ? 'ring-2 ring-offset-2 ring-ink ring-offset-card scale-105' : 'hover:scale-105')}
+            style=${{ background: c }}></button>`)}
+        </div>
+      </div>
+      <div>
+        <label className="lbl">Members</label>
+        ${members.length > 0 && html`<div className="flex flex-wrap gap-1.5 mb-2.5">
+          ${members.map(m => html`<span key=${m.id} className="inline-flex items-center gap-1.5 bg-paper border border-line rounded-full pl-1 pr-1.5 py-1">
+            <${Avatar} m=${m} size=${22}/>
+            <span className="text-[13px] font-medium pr-0.5">${m.name}</span>
+            <button onClick=${() => setMembers(ms => ms.filter(x => x.id !== m.id))} aria-label="Remove" className="p-0.5 rounded-full text-muted hover:text-rust"><${Icon} name="x" size=${13}/></button>
+          </span>`)}
+        </div>`}
+        <div className="flex gap-2">
+          <input ref=${ref} value=${draft} onChange=${e => setDraft(e.target.value)}
+            onKeyDown=${e => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
+            placeholder="Type a name, press Enter" className="inp flex-1"/>
+          <button onClick=${add} className="px-4 rounded-xl bg-ink text-paper text-[13.5px] font-semibold hover:bg-ink/90 transition active:scale-95">Add</button>
+        </div>
+        ${members.length < 2 && html`<p className="mt-2 text-[12px] text-muted">Add at least two people — you can add more later.</p>`}
+      </div>
+    </div>
+  <//>`;
+}
+
+function ConfirmOwnSheet({ hasOwn, onClose, onConfirm }) {
+  return html`<${Sheet} title="Make it yours" onClose=${onClose}
+    footer=${html`<div className="px-5 py-3.5 border-t border-line bg-card flex gap-2">
+      <button onClick=${onClose} className="flex-1 rounded-2xl py-3 text-[14px] font-semibold border border-line hover:border-muted transition">Keep exploring</button>
+      <button onClick=${onConfirm} className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-2xl py-3 text-[14px] font-semibold bg-ink text-paper hover:bg-ink/90 transition active:scale-[.98]">
+        <${Icon} name="sparkle" size=${15}/> Start fresh</button>
+    </div>`}>
+    <div className="flex items-start gap-3.5">
+      <span className="w-11 h-11 rounded-2xl bg-rust-tint text-rust-deep flex items-center justify-center shrink-0"><${Icon} name="sparkle" size=${19}/></span>
+      <div>
+        <p className="text-[14px] leading-relaxed">
+          This clears the <span className="font-semibold">Goa Trip</span> tutorial data
+          ${hasOwn ? ' — your own groups stay untouched.' : ' from this browser.'}
+          Everything you create next is saved locally and fully editable: rename the group, manage members, edit or delete expenses and settlements.
+        </p>
+      </div>
+    </div>
+  <//>`;
+}
+
+/* ---------------- home ---------------- */
+
+function Home({ db, onOpen, onCreate, onReset, onLoadDemo, onMakeOwn, onboarding, clearOnboarding }) {
+  const [creating, setCreating] = useState(false);
+  const autoRef = useRef(false);
+  useEffect(() => {
+    if (onboarding && !autoRef.current) { autoRef.current = true; setCreating(true); }
+  }, [onboarding]);
+
+  const hasOwn = db.groups.some(g => !g.demo);
+
+  return html`<div className="min-h-screen flex flex-col">
+    <div className="max-w-2xl w-full mx-auto px-5 pt-12 pb-16 flex-1">
+      <header className="flex items-center gap-3.5">
+        <div className="w-12 h-12 rounded-2xl bg-ink flex items-center justify-center shadow-soft">
+          <span className="font-display text-paper text-[26px] font-semibold">₹</span>
+        </div>
+        <div>
+          <div className="font-display text-[27px] font-semibold leading-none">Hisaab</div>
+          <div className="text-[13px] text-muted mt-1.5">Who owes whom — at a glance.</div>
+        </div>
+      </header>
+
+      ${db.groups.length === 0 && html`<div className="mt-10 text-center border-2 border-dashed border-line rounded-3xl px-6 py-12">
+        <span className="inline-flex w-14 h-14 rounded-2xl bg-rust-tint text-rust-deep items-center justify-center"><${Icon} name="sparkle" size=${24}/></span>
+        <h2 className="mt-4 font-display text-[24px] font-semibold">Make it yours</h2>
+        <p className="mt-2 text-[14px] text-muted max-w-sm mx-auto">Create a group, add your people, and start splitting. No accounts — everything lives in this browser.</p>
+        <button onClick=${() => setCreating(true)}
+          className="mt-5 inline-flex items-center gap-2 rounded-full bg-ink text-paper px-5 py-2.5 text-[14px] font-semibold hover:bg-ink/90 transition active:scale-95">
+          <${Icon} name="plus" size=${15} sw=${2.4}/> Create your first group
+        </button>
+      </div>`}
+
+      ${db.groups.length > 0 && html`<div className="mt-10 flex items-end justify-between">
+        <h2 className="font-display text-lg font-semibold">Your groups</h2>
+        <span className="text-[13px] text-muted">${db.groups.length} group${db.groups.length === 1 ? '' : 's'}</span>
+      </div>`}
+
+      ${db.demo && db.groups.length > 0 && html`<div className="mt-3 rounded-2xl border border-line bg-card p-4 sm:p-5 shadow-soft">
+        <div className="flex items-start gap-3">
+          <span className="w-9 h-9 rounded-full bg-rust-tint text-rust-deep flex items-center justify-center shrink-0"><${Icon} name="book" size=${16}/></span>
+          <div className="flex-1 min-w-0">
+            <div className="font-display text-[16px] font-semibold">Tutorial demo</div>
+            <p className="text-[12.5px] text-muted mt-0.5">Explore the sample “Goa Trip” below — tap anything, it’s safe. When you’re ready, wipe it and build your own.</p>
+          </div>
+        </div>
+        <button onClick=${onMakeOwn}
+          className="mt-3.5 w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-ink text-paper py-2.5 text-[13.5px] font-semibold hover:bg-ink/90 transition active:scale-[.98]">
+          <${Icon} name="sparkle" size=${15}/> Make your own
+        </button>
+      </div>`}
+
+      <div className="mt-3 space-y-2.5">
+        ${db.groups.map(g => {
+          const st = groupStats(g);
+          return html`<button key=${g.id} onClick=${() => onOpen(g.id)}
+            className="w-full text-left bg-card border border-line rounded-2xl p-4 flex items-center gap-4 hover:shadow-soft hover:-translate-y-[2px] active:translate-y-0 transition-all duration-200 group">
+            <span className="w-1.5 self-stretch rounded-full shrink-0" style=${{ background: g.color }}></span>
+            <span className="flex-1 min-w-0">
+              <span className="flex items-center gap-2 min-w-0">
+                <span className="font-display text-[19px] font-semibold truncate">${g.name}</span>
+                ${g.demo && html`<span className="text-[10px] font-bold tracking-wider uppercase text-rust-deep bg-rust-tint rounded-full px-2 py-0.5 shrink-0">Tutorial</span>`}
+              </span>
+              <span className="block text-[12.5px] text-muted mt-1">
+                <span className="numtab">${g.members.length}</span> members · <span className="numtab">${fmt(st.total)}</span> spent ·
+                ${st.debts > 0
+                  ? html`<span className="text-rust font-semibold">${st.debts} open debt${st.debts === 1 ? '' : 's'}</span>`
+                  : html`<span className="text-sage-deep font-semibold">all settled</span>`}
+              </span>
+            </span>
+            <${AvStack} members=${g.members} size=${24}/>
+            <span className="text-muted group-hover:translate-x-0.5 transition-transform shrink-0"><${Icon} name="right" size=${18}/></span>
+          </button>`;
+        })}
+        <button onClick=${() => setCreating(true)}
+          className="w-full border-2 border-dashed border-line rounded-2xl p-4 flex items-center justify-center gap-2 text-muted hover:text-ink hover:border-muted transition">
+          <${Icon} name="plus" size=${16}/><span className="text-[14px] font-semibold">New group</span>
+        </button>
+      </div>
+
+      <footer className="mt-12 pt-5 border-t border-line text-[12.5px] text-muted flex items-center justify-between gap-3 flex-wrap">
+        <span>Saved in this browser · no accounts, no sync.</span>
+        ${db.demo
+          ? html`<button onClick=${onReset} className="font-semibold text-muted hover:text-rust underline underline-offset-4 decoration-line">Reset demo data</button>`
+          : html`<button onClick=${onLoadDemo} className="inline-flex items-center gap-1.5 font-semibold text-muted hover:text-ink underline underline-offset-4 decoration-line">
+              <${Icon} name="replay" size=${13}/> Load tutorial demo</button>`}
+      </footer>
+    </div>
+
+    ${creating && html`<${CreateGroupSheet} onboarding=${onboarding && !hasOwn}
+      onClose=${() => { setCreating(false); clearOnboarding(); }}
+      onCreate=${g => { setCreating(false); clearOnboarding(); onCreate(g); }}/>`}
+  </div>`;
+}
+
+/* ---------------- group view ---------------- */
+
+function GroupView({ group, actions, onBack, showToast, onMakeOwn, tourDone, markTourDone }) {
+  const [tab, setTab] = useState('balance');
+  const [selected, setSelected] = useState(null);
+  const [sheet, setSheet] = useState(null);
+  const [tour, setTour] = useState(false);
+  const [nameEdit, setNameEdit] = useState(false);
+  const [nameDraft, setNameDraft] = useState(group.name);
+
+  const { edges, net } = useMemo(() => computePairwise(group), [group]);
+  const simplified = useMemo(() => simplify(net), [net]);
+  const total = useMemo(() => group.expenses.reduce((s, e) => s + (+e.amount || 0), 0), [group.expenses]);
+  const byId = useMemo(() => Object.fromEntries(group.members.map(m => [m.id, m])), [group.members]);
+
+  const openSettle = prefill => setSheet({ type: 'settle', prefill });
+  const openEdit = e => setSheet({ type: 'expense', edit: e });
+
+  /* auto-start the guided tour once, on first visit to the demo */
+  useEffect(() => {
+    if (group.demo && !tourDone) {
+      const t = setTimeout(() => setTour(true), 700);
+      return () => clearTimeout(t);
+    }
+  }, []);
+
+  const endTour = () => { setTour(false); markTourDone(); };
+
+  const commitName = () => {
+    setNameEdit(false);
+    const v = nameDraft.trim();
+    if (v && v !== group.name) { actions.renameGroup(group.id, v); showToast('Group renamed', 'check'); }
+  };
+
+  return html`<div className="min-h-screen">
+    <div className="max-w-3xl mx-auto px-4 sm:px-6 pt-5">
+      <button onClick=${onBack} className="inline-flex items-center gap-1 text-[13.5px] font-medium text-muted hover:text-ink transition -ml-1">
+        <${Icon} name="left" size=${16}/> All groups
+      </button>
+      <div className="mt-2.5">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className="w-2.5 h-2.5 rounded-full shrink-0" style=${{ background: group.color }}></span>
+          ${nameEdit
+            ? html`<input autoFocus value=${nameDraft}
+                onChange=${e => setNameDraft(e.target.value)}
+                onBlur=${commitName}
+                onKeyDown=${e => { if (e.key === 'Enter') commitName(); if (e.key === 'Escape') { setNameEdit(false); setNameDraft(group.name); } }}
+                className="font-display text-[24px] sm:text-[28px] font-semibold leading-tight bg-transparent border-b-2 border-ink outline-none w-full min-w-0"/>`
+            : html`<h1 className="font-display text-[28px] sm:text-[32px] font-semibold leading-tight truncate">${group.name}</h1>
+               <button onClick=${() => { setNameDraft(group.name); setNameEdit(true); }} aria-label="Rename group"
+                 className="p-1.5 rounded-full text-muted hover:text-ink hover:bg-paper transition shrink-0"><${Icon} name="pencil" size=${15}/></button>`}
+        </div>
+        <p className="text-[13.5px] text-muted mt-1">
+          <span className="numtab">${fmt(total)}</span> spent · ${group.expenses.length} expense${group.expenses.length === 1 ? '' : 's'} · ${group.members.length} members
+        </p>
+      </div>
+      <div className="mt-3.5 flex items-center gap-2 flex-wrap">
+        <${AvStack} members=${group.members} size=${30}/>
+        <button onClick=${() => setSheet({ type: 'members' })} aria-label="Manage members"
+          className="w-[30px] h-[30px] rounded-full border-2 border-dashed border-line text-muted hover:text-ink hover:border-muted flex items-center justify-center transition">
+          <${Icon} name="plus" size=${13} sw=${2.5}/>
+        </button>
+      </div>
+
+      ${group.demo && html`<div className="mt-4 flex flex-col sm:flex-row sm:items-center gap-3 rounded-2xl border border-line bg-card p-3.5 shadow-soft">
+        <span className="w-9 h-9 rounded-full bg-rust-tint text-rust-deep flex items-center justify-center shrink-0"><${Icon} name="book" size=${16}/></span>
+        <div className="flex-1 min-w-0">
+          <div className="text-[14px] font-semibold">Tutorial demo</div>
+          <div className="text-[12.5px] text-muted">Explore freely — nothing here is real. Start fresh whenever you like.</div>
+        </div>
+        <div className="flex gap-2 shrink-0">
+          <button onClick=${() => setTour(true)}
+            className="inline-flex items-center gap-1.5 rounded-full border border-line px-3.5 py-2 text-[13px] font-semibold hover:border-muted transition active:scale-95">
+            <${Icon} name="replay" size=${14}/> Tour</button>
+          <button onClick=${onMakeOwn}
+            className="inline-flex items-center gap-1.5 rounded-full bg-ink text-paper px-3.5 py-2 text-[13px] font-semibold hover:bg-ink/90 transition active:scale-95">
+            <${Icon} name="sparkle" size=${14}/> Make your own</button>
+        </div>
+      </div>`}
+    </div>
+
+    <div className="sticky top-0 z-30 mt-4 bg-paper/85 backdrop-blur-md border-y border-line">
+      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-2.5 flex items-center gap-2">
+        <div className="flex bg-card border border-line rounded-full p-0.5 text-[13px] font-semibold">
+          ${[['balance','Balance'],['activity','Activity']].map(([k, l]) => html`<button key=${k} id=${k === 'activity' ? 'tour-activity' : undefined}
+            onClick=${() => { setTab(k); setSelected(null); }}
+            className=${'px-3.5 sm:px-4 py-1.5 rounded-full transition ' + (tab === k ? 'bg-ink text-paper shadow-sm' : 'text-muted hover:text-ink')}>${l}</button>`)}
+        </div>
+        <div className="flex-1"></div>
+        <button onClick=${() => openSettle(null)} id="tour-settle" aria-label="Settle up"
+          className="sm:hidden inline-flex items-center justify-center w-9 h-9 rounded-full border border-line bg-card text-ink active:scale-95 transition">
+          <${Icon} name="arrLR" size=${16}/>
+        </button>
+        <button onClick=${() => openSettle(null)} id="tour-settle"
+          className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-line bg-card px-3.5 py-2 text-[13px] font-semibold hover:border-muted transition active:scale-95">
+          <${Icon} name="arrLR" size=${15}/> Settle up
+        </button>
+        <button onClick=${() => setSheet({ type: 'expense' })} id="tour-add"
+          className="inline-flex items-center gap-1.5 rounded-full bg-ink text-paper px-4 py-2 text-[13px] font-semibold shadow-sm hover:bg-ink/90 transition active:scale-95">
+          <${Icon} name="plus" size=${15} sw=${2.4}/>
+          <span className="hidden sm:inline">Add expense</span><span className="sm:hidden">Expense</span>
+        </button>
+      </div>
+    </div>
+
+    ${tab === 'balance'
+      ? html`<${BalanceTab} group=${group} edges=${edges} net=${net} simplified=${simplified} total=${total}
+          selected=${selected} setSelected=${setSelected} openSettle=${openSettle}/>`
+      : html`<${ActivityTab} group=${group} byId=${byId}
+          onDelete=${id => { actions.deleteExpense(group.id, id); showToast('Expense removed', 'trash'); }}
+          onEdit=${openEdit}
+          onDeleteSettlement=${id => { actions.deleteSettlement(group.id, id); showToast('Settlement removed', 'trash'); }}/>}`}
+
+    ${sheet && sheet.type === 'expense' && html`<${AddExpenseSheet} key=${sheet.edit ? 'edit-' + sheet.edit.id : 'new'}
+      group=${group} initial=${sheet.edit || null} onClose=${() => setSheet(null)}
+      onSave=${exp => {
+        if (sheet.edit) { actions.updateExpense(group.id, sheet.edit.id, exp); showToast('Expense updated', 'check'); }
+        else { actions.addExpense(group.id, exp); showToast('Expense added', 'check'); }
+        setSheet(null);
+      }}/>`}
+    ${sheet && sheet.type === 'settle' && html`<${SettleSheet} group=${group} edges=${edges} prefill=${sheet.prefill}
+      onClose=${() => setSheet(null)}
+      onSave=${s => { actions.addSettlement(group.id, s); setSheet(null); showToast('Settled up', 'check'); }}/>`}
+    ${sheet && sheet.type === 'members' && html`<${MembersSheet} group=${group} onClose=${() => setSheet(null)}
+      onAdd=${name => { actions.addMember(group.id, name); showToast(firstName(name) + ' joined the group', 'users'); }}
+      onRemove=${mid => actions.removeMember(group.id, mid)}/>`}
+
+    ${tour && html`<${Tour} steps=${TOUR_STEPS}
+      onFinish=${endTour}
+      onFinal=${() => { endTour(); onMakeOwn(); }}/>`}
+  </div>`;
+}
+
+/* ---------------- app root ---------------- */
+
+function App() {
+  const [db, setDb] = useState(() => {
+    try {
+      const s = JSON.parse(localStorage.getItem(KEY));
+      if (s && Array.isArray(s.groups)) {
+        if (s.v === 2) return s;
+        if (s.v === 1 && s.groups.length) return { v:2, demo:false, tourDone:true, groups:s.groups };
+      }
+    } catch (e) {}
+    return freshDemoDb();
+  });
+  useEffect(() => { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) {} }, [db]);
+
+  const [groupId, setGroupId] = useState(() => (db.groups[0] && db.groups[0].id) || null);
+  const [toast, setToast] = useState(null);
+  const [confirmOwn, setConfirmOwn] = useState(false);
+  const [onboarding, setOnboarding] = useState(false);
+  const showToast = (msg, icon) => setToast({ msg, icon, key: Date.now() });
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 2600);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  const mutate = (gid, fn) => setDb(d => ({ ...d, groups: d.groups.map(g => g.id === gid ? fn(g) : g) }));
+  const actions = {
+    createGroup: g => {
+      const grp = { expenses: [], settlements: [], ...g, id: uid() };
+      setDb(d => ({ ...d, groups: [grp, ...d.groups] }));
+      setGroupId(grp.id);
+    },
+    renameGroup: (gid, name) => mutate(gid, g => ({ ...g, name })),
+    addExpense: (gid, exp) => mutate(gid, g => ({ ...g, expenses: [...g.expenses, { ...exp, id: uid() }] })),
+    updateExpense: (gid, eid, patch) => mutate(gid, g => ({ ...g, expenses: g.expenses.map(e => e.id === eid ? { ...e, ...patch } : e) })),
+    deleteExpense: (gid, eid) => mutate(gid, g => ({ ...g, expenses: g.expenses.filter(e => e.id !== eid) })),
+    addSettlement: (gid, s) => mutate(gid, g => ({ ...g, settlements: [...g.settlements, { ...s, id: uid() }] })),
+    deleteSettlement: (gid, sid) => mutate(gid, g => ({ ...g, settlements: g.settlements.filter(s => s.id !== sid) })),
+    addMember: (gid, name) => mutate(gid, g => ({ ...g, members: [...g.members, { id: uid(), name, color: AV[g.members.length % AV.length] }] })),
+    removeMember: (gid, mid) => mutate(gid, g => ({ ...g, members: g.members.filter(m => m.id !== mid) })),
+  };
+
+  const markTourDone = () => setDb(d => d.tourDone ? d : ({ ...d, tourDone: true }));
+
+  const makeOwn = () => {
+    setDb(d => ({ ...d, demo: false, tourDone: true, groups: d.groups.filter(g => !g.demo) }));
+    setGroupId(null);
+    setConfirmOwn(false);
+    setOnboarding(true);
+    showToast('Fresh start — create your group', 'sparkle');
+  };
+
+  const loadDemo = () => {
+    const g = seedGroup();
+    setDb(d => ({ v:2, demo:true, tourDone:false, groups:[g, ...d.groups.filter(x => !x.demo)] }));
+    setGroupId(g.id);
+    showToast('Tutorial demo loaded', 'book');
+  };
+
+  const resetAll = () => {
+    const s = freshDemoDb();
+    setDb(s);
+    setGroupId(s.groups[0].id);
+    setOnboarding(false);
+    showToast('Demo data restored', 'clock');
+  };
+
+  const group = db.groups.find(g => g.id === groupId) || null;
+
+  return html`<div className="min-h-screen">
+    ${group
+      ? html`<${GroupView} key=${group.id} group=${group} actions=${actions} onBack=${() => setGroupId(null)}
+          showToast=${showToast} onMakeOwn=${() => setConfirmOwn(true)}
+          tourDone=${db.tourDone} markTourDone=${markTourDone}/>`
+      : html`<${Home} db=${db} onOpen=${setGroupId}
+          onCreate=${g => { actions.createGroup(g); setOnboarding(false); }}
+          onReset=${resetAll}
+          onLoadDemo=${loadDemo}
+          onMakeOwn=${() => setConfirmOwn(true)}
+          onboarding=${onboarding} clearOnboarding=${() => setOnboarding(false)}/>`}
+
+    ${confirmOwn && html`<${ConfirmOwnSheet}
+      hasOwn=${db.groups.some(g => !g.demo)}
+      onClose=${() => setConfirmOwn(false)}
+      onConfirm=${makeOwn}/>`}
+
+    <${ToastView} toast=${toast}/>
+  </div>`;
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(html`<${App}/>`);
+</script>
+</body>
+</html>
