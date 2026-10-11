@@ -1,5 +1,5 @@
 # Hisaab
-https://splid.zencrypt-exe.workers.dev/
+https://splid.splid.workers.dev/
 
 
 **Who owes whom, at a glance.**
