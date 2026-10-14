@@ -121,6 +121,7 @@ const ICONS = {
   book:[P('M4 19.5A2.5 2.5 0 0 1 6.5 17H20'),P('M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z')],
   replay:[P('M3 12a9 9 0 1 0 9-9 9.7 9.7 0 0 0-6.74 2.74L3 8'),P('M3 3v5h5')],
   users:[P('M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2'),{t:'c',cx:9.5,cy:7,r:4},P('M22 21v-2a4 4 0 0 0-3-3.87'),P('M15.5 3.13a4 4 0 0 1 0 7.75')],
+  github:[P('M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4'),P('M9 18c-4.51 2-5-2-7-2')],
 };
 
 function Icon({ name, size=18, sw=2, className='' }) {
@@ -324,6 +325,31 @@ function ToastView({ toast }) {
       <span className="text-[13.5px] font-semibold pr-1">${toast.msg}</span>
     </div>
   </div>`;
+}
+
+/* ---------------- footer · GitHub link + credit ---------------- */
+
+const GITHUB_URL = 'https://github.com/zencrypton/splid';
+
+function Footer() {
+  return html`<footer className="mt-12 border-t border-line bg-card/60">
+    <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 pb-24 flex flex-col items-center gap-4 text-center">
+      <a href=${GITHUB_URL} target="_blank" rel="noopener noreferrer"
+        aria-label="View Splid on GitHub"
+        className="group inline-flex items-center gap-2.5 rounded-full border border-line bg-card pl-1.5 pr-4 py-1.5 shadow-soft transition-all duration-200 hover:border-ink/60 hover:shadow-pop hover:-translate-y-0.5 active:scale-95">
+        <span className="w-8 h-8 rounded-full bg-ink text-paper flex items-center justify-center transition-transform duration-200 group-hover:scale-110">
+          <${Icon} name="github" size=${15} sw=${1.8}/>
+        </span>
+        <span className="text-[13px] font-semibold">zencrypton<span className="text-muted font-normal">/splid</span></span>
+        <span className="text-muted transition-transform duration-200 group-hover:translate-x-0.5"><${Icon} name="arrR" size=${13}/></span>
+      </a>
+      <p className="text-[12px] text-muted leading-relaxed">
+        Developed &amp; managed by
+        <span className="inline-block ml-1.5 font-display font-bold tracking-[.16em] text-[11.5px] text-ink/90 uppercase border-b-2 border-rust/50 pb-[1px]">Afterdark</span>
+      </p>
+      <p className="text-[11px] text-muted/60">© ${new Date().getFullYear()} Hisaab · who owes whom, at a glance</p>
+    </div>
+  </footer>`;
 }
 
 /* ---------------- guided tour (coach marks) ---------------- */
@@ -682,7 +708,7 @@ function SettleHistory({ group, byId }) {
 function BalanceTab({ group, edges, net, simplified, total, selected, setSelected, openSettle }) {
   const [mode, setMode] = useState('direct');
   const byId = useMemo(() => Object.fromEntries(group.members.map(m => [m.id, m])), [group.members]);
-  return html`<div className="max-w-3xl mx-auto px-4 sm:px-6 pt-5 pb-28">
+  return html`<div className="max-w-3xl mx-auto px-4 sm:px-6 pt-5 pb-10">
     <div id="tour-graph" className="bg-card border border-line rounded-3xl shadow-soft overflow-hidden">
       <div className="flex items-center justify-between gap-3 px-4 sm:px-5 pt-4 pb-2">
         <div className="min-w-0">
@@ -703,7 +729,7 @@ function BalanceTab({ group, edges, net, simplified, total, selected, setSelecte
     ${selected && html`<${MemberPanel} key=${selected} group=${group} memberId=${selected} edges=${edges} net=${net}
       byId=${byId} onClose=${() => setSelected(null)} onSettle=${openSettle}/>`}
 
-    <div className="mt-5"><${SettleSuggestions} items=${simplified} byId=${byId} onSettle=${openSettle}/></div>
+    <div className="mt-5" id="tour-settle"><${SettleSuggestions} items=${simplified} byId=${byId} onSettle=${openSettle}/></div>
     <div className="mt-4"><${SettleHistory} group=${group} byId=${byId}/></div>
   </div>`;
 }
@@ -791,7 +817,7 @@ function ActivityTab({ group, byId, onDelete, onEdit, onDeleteSettlement }) {
     ...group.settlements.map(s => ({ k: 's', ts: s.date, s })),
   ].sort((a, b) => b.ts - a.ts), [group]);
 
-  if (entries.length === 0) return html`<div className="max-w-3xl mx-auto px-4 sm:px-6 pt-16 pb-28 text-center">
+  if (entries.length === 0) return html`<div className="max-w-3xl mx-auto px-4 sm:px-6 pt-16 pb-16 text-center">
     <span className="inline-flex w-14 h-14 rounded-full bg-card border border-line items-center justify-center text-muted"><${Icon} name="wallet" size=${22}/></span>
     <p className="mt-3 font-display text-lg font-semibold">Nothing yet</p>
     <p className="text-[13.5px] text-muted mt-1">Expenses and settlements will appear here as a story feed.</p>
@@ -806,7 +832,7 @@ function ActivityTab({ group, byId, onDelete, onEdit, onDeleteSettlement }) {
   }
   const lastId = (entries[entries.length - 1].e || entries[entries.length - 1].s).id;
 
-  return html`<div className="max-w-3xl mx-auto px-4 sm:px-6 pt-5 pb-28">
+  return html`<div className="max-w-3xl mx-auto px-4 sm:px-6 pt-5 pb-10">
     ${days.map(day => html`<div key=${day.label} className="mb-7">
       <div className="flex items-center gap-3 mb-3.5">
         <span className="text-[11px] font-bold tracking-[.18em] uppercase text-muted">${day.label}</span>
@@ -891,43 +917,49 @@ function AddExpenseSheet({ group, onClose, onSave, initial }) {
 
   const save = () => {
     if (!valid) return;
-    const payerId = members.find(m => m.id === payer) ? payer : (members[0] && members[0].id);
-    const splits = mode === 'equal'
-      ? Object.fromEntries(inclIds.map(id => [id, eqShares[id]]))
-      : mode === 'custom'
-        ? Object.fromEntries(members.map(m => [m.id, cP[m.id] / 100]))
-        : Object.fromEntries(members.map(m => [m.id, pPaise[m.id] / 100]));
-    onSave({ desc: desc.trim() || CATS[cat].label, amount: amt, payerId, category: cat, splitType: mode, splits, date: init ? init.date : Date.now() });
+    let splits;
+    if (mode === 'equal') splits = Object.fromEntries(members.map(m => [m.id, eqShares[m.id] || 0]));
+    else if (mode === 'custom') splits = Object.fromEntries(members.map(m => [m.id, cP[m.id] / 100]));
+    else splits = Object.fromEntries(members.map(m => [m.id, pPaise[m.id] / 100]));
+    onSave({
+      id: init ? init.id : uid(),
+      desc: desc.trim() || (CATS[cat] ? CATS[cat].label : 'Expense'),
+      amount: round2(amt),
+      payerId: payer,
+      category: cat,
+      splitType: mode,
+      date: init ? init.date : Date.now(),
+      splits,
+    });
   };
 
-  const payerName = firstName((members.find(m => m.id === payer) || {}).name);
-
-  return html`<${Sheet} title=${init ? 'Edit expense' : 'Add expense'} onClose=${onClose} wide=${true}
-    footer=${html`<div className="px-5 py-3.5 border-t border-line bg-card">
+  return html`<${Sheet} title=${init ? 'Edit expense' : 'Add expense'} onClose=${onClose}
+    footer=${html`<div className="shrink-0 border-t border-line px-5 py-3.5 flex items-center gap-2 bg-card">
+      <button onClick=${onClose} className="rounded-full border border-line px-4 py-2.5 text-[13.5px] font-semibold hover:border-muted transition">Cancel</button>
+      <div className="flex-1"></div>
       <button onClick=${save} disabled=${!valid}
-        className=${'w-full rounded-2xl py-3 text-[15px] font-semibold transition active:scale-[.98] ' +
-          (valid ? 'bg-ink text-paper hover:bg-ink/90' : 'bg-ink/10 text-ink/35 cursor-not-allowed')}>
-        ${init ? 'Save changes' : ('Add expense' + (amtP > 0 ? ' · ' + fmt(amt) : ''))}
+        className=${'rounded-full px-5 py-2.5 text-[13.5px] font-semibold transition active:scale-95 ' +
+          (valid ? 'bg-ink text-paper hover:bg-ink/90' : 'bg-ink/20 text-paper cursor-not-allowed')}>
+        ${init ? 'Save changes' : 'Add expense'}
       </button>
     </div>`}>
-
     <div className="space-y-5">
       <div>
-        <div className="flex items-baseline gap-2 border-b-2 border-ink/70 focus-within:border-ink transition pb-1.5">
-          <span className="font-display text-[26px] text-muted">₹</span>
-          <input autoFocus value=${amount} onChange=${e => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
-            inputMode="decimal" placeholder="0"
-            className="flex-1 min-w-0 bg-transparent outline-none font-display text-[36px] font-semibold placeholder:text-ink/20 numtab"/>
+        <label className="lbl">Amount</label>
+        <div className="relative">
+          <span className="absolute left-4 top-1/2 -translate-y-1/2 font-display text-[20px] font-semibold text-muted">₹</span>
+          <input inputMode="decimal" className="inp !pl-9 font-display text-[22px] font-semibold numtab" placeholder="0"
+            value=${amount} onChange=${e => setAmount(e.target.value.replace(/[^\d.]/g, ''))}/>
         </div>
       </div>
 
       <div>
-        <input value=${desc} onChange=${e => setDesc(e.target.value)} placeholder="What was it for? (optional)"
-          className="inp"/>
+        <label className="lbl">Description</label>
+        <input className="inp" placeholder="What was it for?" maxLength=${60} value=${desc} onChange=${e => setDesc(e.target.value)}/>
         <div className="mt-2 flex flex-wrap gap-1.5">
-          ${QUICK.map(([d, c]) => html`<button key=${d} onClick=${() => { setDesc(d); setCat(c); }}
-            className=${'text-[12.5px] font-semibold rounded-full px-2.5 py-1 border transition ' +
-              (desc === d ? 'bg-ink text-paper border-ink' : 'border-line text-muted hover:text-ink hover:border-muted')}>${d}</button>`)}
+          ${QUICK.map(([q, c]) => html`<button key=${q} onClick=${() => { setDesc(q); setCat(c); }}
+            className=${'text-[12px] font-semibold rounded-full px-2.5 py-1 border transition ' +
+              (desc === q ? 'bg-ink text-paper border-ink' : 'border-line text-muted hover:text-ink hover:border-muted')}>${q}</button>`)}
         </div>
       </div>
 
@@ -935,101 +967,74 @@ function AddExpenseSheet({ group, onClose, onSave, initial }) {
         <label className="lbl">Category</label>
         <div className="flex gap-2">
           ${Object.entries(CATS).map(([k, c]) => html`<button key=${k} onClick=${() => setCat(k)}
-            className=${'flex-1 flex flex-col items-center gap-1.5 rounded-2xl border py-2.5 transition ' + (cat === k ? 'border-ink bg-paper' : 'border-line hover:border-muted')}>
-            <span className="w-8 h-8 rounded-full flex items-center justify-center"
-              style=${cat === k ? { background: c.fg, color: '#FCF9F3' } : { background: c.tint, color: c.fg }}><${Icon} name=${c.icon} size=${15}/></span>
-            <span className=${'text-[11px] font-semibold ' + (cat === k ? 'text-ink' : 'text-muted')}>${c.label}</span>
+            className=${'flex-1 flex flex-col items-center gap-1 rounded-2xl border px-2 py-2.5 transition ' + (cat === k ? 'border-ink' : 'border-line hover:border-muted')}
+            style=${cat === k ? { background: c.tint } : null}>
+            <span className="w-8 h-8 rounded-full flex items-center justify-center border-2 border-card" style=${{ background: c.tint, color: c.fg }}><${Icon} name=${c.icon} size=${16}/></span>
+            <span className="text-[11.5px] font-semibold" style=${{ color: c.fg }}>${c.label}</span>
           </button>`)}
         </div>
       </div>
 
       <div>
         <label className="lbl">Paid by</label>
-        <div className="flex gap-1 overflow-x-auto pb-1 -mx-1 px-1">
-          ${members.map(m => html`<button key=${m.id} onClick=${() => setPayer(m.id)} className="shrink-0 flex flex-col items-center gap-1 px-1.5 py-1 rounded-xl">
-            <span className=${'rounded-full transition ' + (payer === m.id ? 'ring-2 ring-ink ring-offset-2 ring-offset-card' : 'opacity-80 hover:opacity-100')}>
-              <${Avatar} m=${m} size=${42}/>
-            </span>
-            <span className=${'text-[11.5px] ' + (payer === m.id ? 'font-bold text-ink' : 'text-muted')}>${firstName(m.name)}</span>
+        <div className="flex flex-wrap gap-2">
+          ${members.map(m => html`<button key=${m.id} onClick=${() => setPayer(m.id)}
+            className=${'flex items-center gap-2 rounded-full border pl-1 pr-3 py-1 transition ' + (payer === m.id ? 'border-ink bg-paper' : 'border-line hover:border-muted')}>
+            <${Avatar} m=${m} size=${26}/>
+            <span className="text-[13px] font-semibold">${firstName(m.name)}</span>
           </button>`)}
         </div>
       </div>
 
       <div>
-        <label className="lbl">Split</label>
-        <div className="flex bg-paper border border-line rounded-full p-0.5 text-[12.5px] font-semibold w-fit">
-          ${[['equal','Equal','equal'],['custom','Custom','slider'],['pct','Percentage','pct']].map(([k, l, ic]) => html`<button key=${k} onClick=${() => setMode(k)}
-            className=${'inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full transition ' + (mode === k ? 'bg-ink text-paper' : 'text-muted hover:text-ink')}>
-            <${Icon} name=${ic} size=${13}/>${l}</button>`)}
+        <div className="flex items-center justify-between mb-2">
+          <label className="lbl" style=${{ marginBottom: 0 }}>Split</label>
+          <div className="flex bg-paper border border-line rounded-full p-0.5 text-[11.5px] font-semibold">
+            ${[['equal','Equal'],['custom','Sliders'],['pct','%']].map(([k, l]) => html`<button key=${k} onClick=${() => setMode(k)}
+              className=${'px-2.5 py-1 rounded-full transition ' + (mode === k ? 'bg-ink text-paper' : 'text-muted hover:text-ink')}>${l}</button>`)}
+          </div>
         </div>
 
-        ${mode === 'equal' && html`<div className="mt-3">
-          <div className="flex flex-wrap gap-1.5">
-            ${members.map(m => html`<button key=${m.id}
-              onClick=${() => { const nxt = !incl[m.id]; if (!nxt && inclIds.length <= 1) return; setIncl({ ...incl, [m.id]: nxt }); }}
-              className=${'inline-flex items-center gap-1.5 rounded-full pl-1 pr-3 py-1 border transition ' +
-                (incl[m.id] ? 'bg-ink text-paper border-ink' : 'border-line text-muted bg-paper hover:border-muted')}>
-              <${Avatar} m=${m} size=${22} className=${incl[m.id] ? '' : 'opacity-50 grayscale'}/>
-              <span className="text-[12.5px] font-semibold">${firstName(m.name)}</span>
-              ${incl[m.id] && html`<span className="numtab text-[11.5px] opacity-80">${fmt(eqShares[m.id] || 0)}</span>`}
-            </button>`)}
-          </div>
-          <p className="mt-2.5 text-[13px] text-muted">
-            ${inclIds.length ? html`<span className="numtab font-semibold text-ink">${fmt(each)}</span> each · ${inclIds.length} people` : 'Select at least one person'}
-          </p>
+        ${mode === 'equal' && html`<div className="space-y-1.5">
+          ${members.map(m => html`<button key=${m.id} onClick=${() => setIncl(o => ({ ...o, [m.id]: !o[m.id] }))}
+            className=${'w-full flex items-center gap-2.5 rounded-2xl border px-3 py-2 transition ' + (incl[m.id] ? 'border-line bg-paper' : 'border-line/60 opacity-50')}>
+            <span className=${'w-5 h-5 rounded-md border flex items-center justify-center shrink-0 transition ' + (incl[m.id] ? 'bg-ink border-ink text-paper' : 'border-muted/50')}>
+              ${incl[m.id] && html`<${Icon} name="check" size=${12} sw=${3}/>`}
+            </span>
+            <${Avatar} m=${m} size=${28}/>
+            <span className="text-[13.5px] font-semibold flex-1 text-left">${m.name}</span>
+            <span className="numtab text-[13.5px] font-semibold">${fmt(eqShares[m.id] || 0)}</span>
+          </button>`)}
+          <p className="text-[12px] text-muted pt-1">Each selected person pays <span className="font-semibold text-ink">${fmt(each)}</span>.</p>
         </div>`}
 
-        ${mode === 'custom' && html`<div className="mt-3 space-y-3">
-          ${members.map(m => html`<div key=${m.id}>
-            <div className="flex items-center gap-2.5">
-              <${Avatar} m=${m} size=${26}/>
-              <span className="flex-1 text-[13.5px] font-medium truncate">${m.name}</span>
-              <div className="flex items-center gap-1 bg-paper border border-line rounded-lg px-2 py-1 focus-within:border-ink transition">
-                <span className="text-[12px] text-muted">₹</span>
-                <input value=${cvals[m.id]} onChange=${e => setCvals({ ...cvals, [m.id]: e.target.value.replace(/[^0-9.]/g, '') })}
-                  inputMode="decimal" placeholder="0"
-                  className="w-16 bg-transparent outline-none text-right text-[13.5px] font-semibold numtab"/>
-              </div>
-            </div>
-            <input type="range" min="0" max=${Math.max(amt, 0.01)} step="1" disabled=${amt <= 0}
-              value=${Math.min(parseFloat(cvals[m.id]) || 0, amt)}
-              onChange=${e => setCvals({ ...cvals, [m.id]: String(Math.round(Number(e.target.value) * 100) / 100) })}
-              className="mt-1"/>
+        ${mode === 'custom' && html`<div className="space-y-3">
+          ${members.map(m => html`<div key=${m.id} className="flex items-center gap-3">
+            <${Avatar} m=${m} size=${28}/>
+            <input type="range" min="0" max=${Math.max(amtP, 1)} step="1" value=${Math.min(cP[m.id], Math.max(amtP, 0))} disabled=${amtP <= 0}
+              onChange=${e => {
+                const remaining = amtP - (cSum - cP[m.id]);
+                const v = Math.max(0, Math.min(remaining, Number(e.target.value)));
+                setCvals(o => ({ ...o, [m.id]: String(v / 100) }));
+              }} className="flex-1"/>
+            <span className="numtab text-[13px] font-semibold w-16 text-right">${fmt(cP[m.id] / 100)}</span>
           </div>`)}
-          <div className=${'inline-flex items-center gap-1.5 text-[12.5px] font-semibold rounded-full px-3 py-1.5 border ' +
-              (cRem === 0 && cSum > 0 ? 'bg-sage-tint text-sage-deep border-sage/30' : cRem === 0 ? 'bg-paper border-line text-muted' : 'bg-rust-tint text-rust-deep border-rust/30')}>
-            <${Icon} name=${cRem === 0 && cSum > 0 ? 'check' : 'wallet'} size=${13}/>
-            ${cRem === 0 ? (cSum > 0 ? 'Fully assigned' : 'Enter an amount above')
-              : cRem > 0 ? fmt(cRem / 100) + ' left to assign' : fmt(-cRem / 100) + ' over the total'}
+          <div className=${'text-[12.5px] font-semibold numtab ' + (cRem === 0 ? 'text-sage-deep' : 'text-rust-deep')}>
+            ${cRem === 0 ? '✓ Fully assigned' : fmt(Math.abs(cRem) / 100) + (cRem > 0 ? ' left to assign' : ' over — reduce someone')}
           </div>
-          ${cRem > 0 && html`<button onClick=${() => {
-              const t = members.find(m => m.id === payer) || members[0];
-              const cur = cP[t.id];
-              setCvals({ ...cvals, [t.id]: String(Math.round((cur + cRem)) / 100) });
-            }} className="ml-2 text-[12.5px] font-bold text-ink underline underline-offset-4 decoration-line hover:decoration-ink">
-            Add to ${payerName}
-          </button>`}
         </div>`}
 
-        ${mode === 'pct' && html`<div className="mt-3 space-y-2.5">
-          <div className="flex justify-end">
-            <button onClick=${evenPct} className="text-[12px] font-bold text-ink underline underline-offset-4 decoration-line hover:decoration-ink">Even %</button>
-          </div>
-          ${members.map(m => html`<div key=${m.id} className="flex items-center gap-2.5">
-            <${Avatar} m=${m} size=${26}/>
-            <span className="flex-1 text-[13.5px] font-medium truncate">${m.name}</span>
-            <div className="flex items-center gap-1 bg-paper border border-line rounded-lg px-2 py-1 focus-within:border-ink transition">
-              <input value=${pvals[m.id]} onChange=${e => setPvals({ ...pvals, [m.id]: e.target.value.replace(/[^0-9.]/g, '') })}
-                inputMode="decimal" placeholder="0"
-                className="w-12 bg-transparent outline-none text-right text-[13.5px] font-semibold numtab"/>
-              <span className="text-[12px] text-muted">%</span>
-            </div>
-            <span className="w-16 text-right text-[13px] numtab text-muted">${fmt(Math.round(pPaise[m.id]) / 100)}</span>
+        ${mode === 'pct' && html`<div className="space-y-2">
+          ${members.map(m => html`<div key=${m.id} className="flex items-center gap-3">
+            <${Avatar} m=${m} size=${28}/>
+            <input inputMode="decimal" className="inp !py-1.5 text-[13.5px] numtab" placeholder="0" value=${pvals[m.id]}
+              onChange=${e => setPvals(o => ({ ...o, [m.id]: e.target.value.replace(/[^\d.]/g, '') }))}/>
+            <span className="text-[13px] text-muted font-semibold w-4">%</span>
+            <span className="numtab text-[13px] font-semibold w-20 text-right">${fmt(pPaise[m.id] / 100)}</span>
           </div>`)}
-          <div className=${'inline-flex items-center gap-1.5 text-[12.5px] font-semibold rounded-full px-3 py-1.5 border ' +
-              (pOk ? 'bg-sage-tint text-sage-deep border-sage/30' : 'bg-rust-tint text-rust-deep border-rust/30')}>
-            <${Icon} name=${pOk ? 'check' : 'pct'} size=${13}/>
-            ${pOk ? 'Adds up to 100%' : Math.round(pSum * 10) / 10 + '% — must total 100%'}
+          <div className="flex items-center justify-between pt-1">
+            <div className=${'text-[12.5px] font-semibold numtab ' + (pOk ? 'text-sage-deep' : 'text-rust-deep')}>${Math.round(pSum * 100) / 100}% assigned</div>
+            <button onClick=${evenPct} className="text-[12px] font-bold rounded-full border border-line px-3 py-1.5 hover:border-ink transition">Split evenly</button>
           </div>
         </div>`}
       </div>
@@ -1037,29 +1042,29 @@ function AddExpenseSheet({ group, onClose, onSave, initial }) {
   <//>`;
 }
 
-function SettleSheet({ group, edges, prefill, onClose, onSave }) {
+function SettleSheet({ group, preset, onClose, onSave }) {
   const members = group.members;
-  const direct = (f, t) => { const e = edges.find(x => x.from === f && x.to === t); return e ? round2(e.amount) : 0; };
-  const [from, setFrom] = useState(prefill && prefill.from ? prefill.from : (members[0] && members[0].id));
-  const [to, setTo] = useState(prefill && prefill.to ? prefill.to : (members.find(m => m.id !== from) || {}).id);
-  const [amount, setAmount] = useState(String((prefill && prefill.amount) || direct(prefill && prefill.from, prefill && prefill.to) || ''));
-  const first = useRef(true);
-  useEffect(() => {
-    if (first.current) { first.current = false; return; }
-    const d = direct(from, to);
-    setAmount(d ? String(d) : '');
-  }, [from, to]);
-
+  const [fromId, setFromId] = useState(preset ? preset.from : members[0].id);
+  const [toId, setToId] = useState(preset ? preset.to : (members[1] || members[0]).id);
+  const [amount, setAmount] = useState(preset ? String(preset.amount) : '');
   const amt = Math.max(0, parseFloat(amount) || 0);
-  const d = direct(from, to);
-  const valid = from && to && from !== to && amt > 0;
+  const valid = amt > 0 && fromId !== toId;
+  const full = preset ? Math.abs(amt - preset.amount) < 0.005 : false;
+  const byId = Object.fromEntries(members.map(m => [m.id, m]));
 
-  const memberRow = (label, value, onChange, other) => html`<div>
-    <label className="lbl">${label}</label>
-    <div className="flex flex-wrap gap-1.5">
-      ${members.map(m => html`<button key=${m.id} disabled=${m.id === other} onClick=${() => onChange(m.id)}
-        className=${'inline-flex items-center gap-1.5 rounded-full pl-1 pr-3 py-1 border transition disabled:opacity-30 disabled:cursor-not-allowed ' +
-          (value === m.id ? 'bg-ink text-paper border-ink' : 'bg-paper border-line hover:border-muted')}>
+  const setFrom = id => { setFromId(id); if (id === toId && members.length > 1) setToId(members.find(m => m.id !== id).id); };
+  const setTo = id => { setToId(id); if (id === fromId && members.length > 1) setFromId(members.find(m => m.id !== id).id); };
+
+  const save = () => {
+    if (!valid) return;
+    onSave({ id: uid(), fromId, toId, amount: round2(amt), date: Date.now(), full });
+  };
+
+  const Row = ({ label, val, set }) => html`<div className="mb-2.5">
+    <div className="text-[11px] font-bold uppercase tracking-[.13em] text-muted mb-1.5">${label}</div>
+    <div className="flex flex-wrap gap-2">
+      ${members.map(m => html`<button key=${m.id} onClick=${() => set(m.id)}
+        className=${'flex items-center gap-2 rounded-full border pl-1 pr-3 py-1 transition ' + (val === m.id ? 'border-ink bg-paper' : 'border-line hover:border-muted')}>
         <${Avatar} m=${m} size=${24}/>
         <span className="text-[13px] font-semibold">${firstName(m.name)}</span>
       </button>`)}
@@ -1067,463 +1072,264 @@ function SettleSheet({ group, edges, prefill, onClose, onSave }) {
   </div>`;
 
   return html`<${Sheet} title="Settle up" onClose=${onClose}
-    footer=${html`<div className="px-5 py-3.5 border-t border-line bg-card">
-      <button disabled=${!valid} onClick=${() => onSave({ fromId: from, toId: to, amount: round2(amt), full: d > 0 && amt >= d - 0.005, date: Date.now() })}
-        className=${'w-full rounded-2xl py-3 text-[15px] font-semibold transition active:scale-[.98] ' +
-          (valid ? 'bg-ink text-paper hover:bg-ink/90' : 'bg-ink/10 text-ink/35 cursor-not-allowed')}>
-        ${amt > 0 ? 'Record payment · ' + fmt(amt) : 'Record payment'}
+    footer=${html`<div className="shrink-0 border-t border-line px-5 py-3.5 flex items-center gap-2 bg-card">
+      <button onClick=${onClose} className="rounded-full border border-line px-4 py-2.5 text-[13.5px] font-semibold hover:border-muted transition">Cancel</button>
+      <div className="flex-1"></div>
+      <button onClick=${save} disabled=${!valid}
+        className=${'rounded-full px-5 py-2.5 text-[13.5px] font-semibold transition active:scale-95 ' +
+          (valid ? 'bg-sage text-paper hover:bg-sage-deep' : 'bg-ink/20 text-paper cursor-not-allowed')}>
+        Record payment
       </button>
-      <p className="text-center text-[11.5px] text-muted mt-2">Logs a real-world payment between these two people.</p>
     </div>`}>
-    <div className="space-y-4">
-      ${memberRow('Who paid', from, setFrom, to)}
-      ${memberRow('Who received it', to, setTo, from)}
+    <div className="space-y-5">
+      ${preset && html`<div className="flex items-center gap-2.5 bg-paper border border-line rounded-2xl px-3.5 py-2.5">
+        <${Avatar} m=${byId[preset.from]} size=${26}/>
+        <span className="text-[13px] flex-1">owes <span className="font-semibold">${(byId[preset.to] || {}).name || '?'}</span></span>
+        <span className="numtab text-[13.5px] font-semibold">${fmt(preset.amount)}</span>
+      </div>`}
+
+      <div>
+        <label className="lbl">Direction</label>
+        <${Row} label="From (who paid)" val=${fromId} set=${setFrom}/>
+        <${Row} label="To (who received)" val=${toId} set=${setTo}/>
+      </div>
+
       <div>
         <label className="lbl">Amount</label>
-        <div className="flex items-baseline gap-2 border-b-2 border-ink/70 focus-within:border-ink pb-1.5">
-          <span className="font-display text-[22px] text-muted">₹</span>
-          <input value=${amount} onChange=${e => setAmount(e.target.value.replace(/[^0-9.]/g, ''))} inputMode="decimal" placeholder="0"
-            className="flex-1 min-w-0 bg-transparent outline-none font-display text-[28px] font-semibold numtab placeholder:text-ink/20"/>
+        <div className="relative">
+          <span className="absolute left-4 top-1/2 -translate-y-1/2 font-display text-[20px] font-semibold text-muted">₹</span>
+          <input inputMode="decimal" className="inp !pl-9 font-display text-[22px] font-semibold numtab" placeholder="0"
+            value=${amount} onChange=${e => setAmount(e.target.value.replace(/[^\d.]/g, ''))}/>
         </div>
-        <div className="mt-2.5 flex items-center justify-between gap-2 flex-wrap">
-          <p className="text-[12.5px] text-muted">
-            ${d > 0
-              ? (amt > d + 0.005
-                ? html`<span>Owes <span className="font-semibold text-ink numtab">${fmt(d)}</span> directly — the extra adjusts other balances too.</span>`
-                : html`<span>Owes <span className="font-semibold text-ink numtab">${fmt(d)}</span> in total${amt > 0 && amt < d - 0.005 ? ' · leaves ' + fmt(d - amt) : ''} — partial is fine.</span>`)
-              : 'No outstanding debt between them — you can still record a payment.'}
-          </p>
-          ${d > 0 && Math.abs(amt - d) > 0.005 && html`<button onClick=${() => setAmount(String(d))}
-            className="text-[12px] font-bold border border-line rounded-full px-2.5 py-1 hover:border-muted transition">Full ${fmt(d)}</button>`}
-        </div>
+        ${preset && html`<div className="mt-2 flex flex-wrap gap-1.5">
+          <button onClick=${() => setAmount(String(round2(preset.amount / 2)))}
+            className="text-[12px] font-semibold rounded-full border border-line px-2.5 py-1 text-muted hover:text-ink hover:border-muted transition">Half · ${fmt(round2(preset.amount / 2))}</button>
+          <button onClick=${() => setAmount(String(preset.amount))}
+            className="text-[12px] font-semibold rounded-full border border-line px-2.5 py-1 text-muted hover:text-ink hover:border-muted transition">Full · ${fmt(preset.amount)}</button>
+        </div>`}
+        ${preset && html`<p className="text-[12px] text-muted mt-2">${full ? 'This clears the debt completely.' : 'Recorded as a partial payment.'}</p>`}
       </div>
     </div>
   <//>`;
 }
 
-function MembersSheet({ group, onClose, onAdd, onRemove }) {
-  const [name, setName] = useState('');
-  const refIds = new Set();
-  group.expenses.forEach(e => { refIds.add(e.payerId); Object.keys(e.splits || {}).forEach(k => refIds.add(k)); });
-  group.settlements.forEach(s => { refIds.add(s.fromId); refIds.add(s.toId); });
-  const add = () => {
-    const v = name.trim(); if (!v) return;
-    if (group.members.some(m => m.name.toLowerCase() === v.toLowerCase())) return;
-    onAdd(v); setName('');
-  };
-  return html`<${Sheet} title="Members" onClose=${onClose}>
-    <div className="space-y-1.5">
-      ${group.members.map(m => html`<div key=${m.id} className="flex items-center gap-3 bg-paper border border-line rounded-2xl px-3 py-2.5">
-        <${Avatar} m=${m} size=${34}/>
-        <span className="flex-1 text-[14.5px] font-medium">${m.name}</span>
-        ${refIds.has(m.id)
-          ? html`<span className="text-[11px] text-muted">in transactions</span>`
-          : html`<button onClick=${() => onRemove(m.id)} aria-label="Remove member" className="p-1.5 rounded-full text-muted hover:text-rust hover:bg-rust-tint transition"><${Icon} name="x" size=${15}/></button>`}
-      </div>`)}
-    </div>
-    <div className="mt-4 flex gap-2">
-      <input value=${name} onChange=${e => setName(e.target.value)} onKeyDown=${e => { if (e.key === 'Enter') add(); }}
-        placeholder="Add someone by name" className="inp flex-1"/>
-      <button onClick=${add} className="px-4 rounded-xl bg-ink text-paper text-[13.5px] font-semibold hover:bg-ink/90 transition active:scale-95">Add</button>
-    </div>
-    <p className="mt-2.5 text-[12px] text-muted">New members start with a zero balance and join future splits.</p>
-  <//>`;
-}
+function GroupSheet({ group, onClose, onSaveGroup, onReset, onReplayTour, isDemo }) {
+  const [name, setName] = useState(group.name);
+  const [members, setMembers] = useState(group.members);
+  const [newName, setNewName] = useState('');
 
-function CreateGroupSheet({ onClose, onCreate, onboarding }) {
-  const GC = ['#BF6A50','#3E7B72','#7E5C86','#B98A2F','#5C7396','#48764F'];
-  const [name, setName] = useState('');
-  const [color, setColor] = useState(GC[0]);
-  const [members, setMembers] = useState([]);
-  const [draft, setDraft] = useState('');
-  const ref = useRef(null);
-  const add = () => {
-    const v = draft.trim(); if (!v) return;
-    if (members.some(m => m.name.toLowerCase() === v.toLowerCase())) return;
-    setMembers(ms => [...ms, { id: uid(), name: v, color: AV[ms.length % AV.length] }]);
-    setDraft('');
-    if (ref.current) ref.current.focus();
+  const addMember = () => {
+    const n = newName.trim(); if (!n) return;
+    setMembers(ms => [...ms, { id: uid(), name: n, color: AV[ms.length % AV.length] }]);
+    setNewName('');
   };
-  const can = name.trim().length > 0 && members.length >= 2;
-  return html`<${Sheet} title=${onboarding ? 'Make it yours' : 'New group'} onClose=${onClose}
-    footer=${html`<div className="px-5 py-3.5 border-t border-line bg-card">
-      <button onClick=${() => can && onCreate({ name: name.trim(), color, members })} disabled=${!can}
-        className=${'w-full rounded-2xl py-3 text-[15px] font-semibold transition active:scale-[.98] ' +
-          (can ? 'bg-ink text-paper hover:bg-ink/90' : 'bg-ink/10 text-ink/35 cursor-not-allowed')}>
-        ${onboarding ? 'Create my group' : 'Create group'}
-      </button>
+  const removeMember = id => { if (members.length > 2) setMembers(ms => ms.filter(m => m.id !== id)); };
+  const save = () => onSaveGroup({ name: name.trim() || group.name, members });
+
+  return html`<${Sheet} title="Group settings" onClose=${onClose}
+    footer=${html`<div className="shrink-0 border-t border-line px-5 py-3.5 flex gap-2 bg-card">
+      <button onClick=${onClose} className="flex-1 rounded-full border border-line px-4 py-2.5 text-[13.5px] font-semibold hover:border-muted transition">Cancel</button>
+      <button onClick=${save} className="flex-1 rounded-full bg-ink text-paper px-4 py-2.5 text-[13.5px] font-semibold hover:bg-ink/90 active:scale-95 transition">Save changes</button>
     </div>`}>
-    ${onboarding && html`<p className="text-[13.5px] text-muted -mt-1 mb-4">Fresh start — everything you build is saved in this browser and fully editable later.</p>`}
     <div className="space-y-5">
       <div>
         <label className="lbl">Group name</label>
-        <input autoFocus value=${name} onChange=${e => setName(e.target.value)} placeholder="Goa Trip, Flat 3B…" className="inp"/>
+        <input className="inp" value=${name} maxLength=${40} onChange=${e => setName(e.target.value)}/>
       </div>
+
       <div>
-        <label className="lbl">Accent</label>
-        <div className="flex gap-2.5">
-          ${GC.map(c => html`<button key=${c} onClick=${() => setColor(c)} aria-label=${'Accent ' + c}
-            className=${'w-8 h-8 rounded-full transition ' + (color === c ? 'ring-2 ring-offset-2 ring-ink ring-offset-card scale-105' : 'hover:scale-105')}
-            style=${{ background: c }}></button>`)}
+        <label className="lbl">Members · ${members.length}</label>
+        <div className="space-y-1.5">
+          ${members.map(m => html`<div key=${m.id} className="flex items-center gap-2.5 bg-paper border border-line rounded-2xl pl-2 pr-2 py-1.5">
+            <${Avatar} m=${m} size=${30}/>
+            <span className="text-[13.5px] font-semibold flex-1 truncate">${m.name}</span>
+            <button onClick=${() => removeMember(m.id)} disabled=${members.length <= 2} aria-label=${'Remove ' + m.name}
+              className=${'p-1.5 rounded-full transition ' + (members.length <= 2 ? 'opacity-30 cursor-not-allowed text-muted' : 'text-muted hover:text-rust hover:bg-rust-tint')}>
+              <${Icon} name="x" size=${14}/>
+            </button>
+          </div>`)}
+        </div>
+        <div className="mt-2 flex gap-2">
+          <input className="inp flex-1" placeholder="Add someone…" maxLength=${24} value=${newName}
+            onChange=${e => setNewName(e.target.value)}
+            onKeyDown=${e => { if (e.key === 'Enter') addMember(); }}/>
+          <button onClick=${addMember} disabled=${!newName.trim()} aria-label="Add member"
+            className=${'shrink-0 w-11 rounded-xl flex items-center justify-center transition ' + (newName.trim() ? 'bg-ink text-paper hover:bg-ink/90 active:scale-95' : 'bg-paper border border-line text-muted')}>
+            <${Icon} name="plus" size=${18}/>
+          </button>
         </div>
       </div>
-      <div>
-        <label className="lbl">Members</label>
-        ${members.length > 0 && html`<div className="flex flex-wrap gap-1.5 mb-2.5">
-          ${members.map(m => html`<span key=${m.id} className="inline-flex items-center gap-1.5 bg-paper border border-line rounded-full pl-1 pr-1.5 py-1">
-            <${Avatar} m=${m} size=${22}/>
-            <span className="text-[13px] font-medium pr-0.5">${m.name}</span>
-            <button onClick=${() => setMembers(ms => ms.filter(x => x.id !== m.id))} aria-label="Remove" className="p-0.5 rounded-full text-muted hover:text-rust"><${Icon} name="x" size=${13}/></button>
-          </span>`)}
-        </div>`}
-        <div className="flex gap-2">
-          <input ref=${ref} value=${draft} onChange=${e => setDraft(e.target.value)}
-            onKeyDown=${e => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
-            placeholder="Type a name, press Enter" className="inp flex-1"/>
-          <button onClick=${add} className="px-4 rounded-xl bg-ink text-paper text-[13.5px] font-semibold hover:bg-ink/90 transition active:scale-95">Add</button>
-        </div>
-        ${members.length < 2 && html`<p className="mt-2 text-[12px] text-muted">Add at least two people — you can add more later.</p>`}
-      </div>
-    </div>
-  <//>`;
-}
 
-function ConfirmOwnSheet({ hasOwn, onClose, onConfirm }) {
-  return html`<${Sheet} title="Make it yours" onClose=${onClose}
-    footer=${html`<div className="px-5 py-3.5 border-t border-line bg-card flex gap-2">
-      <button onClick=${onClose} className="flex-1 rounded-2xl py-3 text-[14px] font-semibold border border-line hover:border-muted transition">Keep exploring</button>
-      <button onClick=${onConfirm} className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-2xl py-3 text-[14px] font-semibold bg-ink text-paper hover:bg-ink/90 transition active:scale-[.98]">
-        <${Icon} name="sparkle" size=${15}/> Start fresh</button>
-    </div>`}>
-    <div className="flex items-start gap-3.5">
-      <span className="w-11 h-11 rounded-2xl bg-rust-tint text-rust-deep flex items-center justify-center shrink-0"><${Icon} name="sparkle" size=${19}/></span>
-      <div>
-        <p className="text-[14px] leading-relaxed">
-          This clears the <span className="font-semibold">Goa Trip</span> tutorial data
-          ${hasOwn ? ' — your own groups stay untouched.' : ' from this browser.'}
-          Everything you create next is saved locally and fully editable: rename the group, manage members, edit or delete expenses and settlements.
-        </p>
-      </div>
-    </div>
-  <//>`;
-}
-
-/* ---------------- home ---------------- */
-
-function Home({ db, onOpen, onCreate, onReset, onLoadDemo, onMakeOwn, onboarding, clearOnboarding }) {
-  const [creating, setCreating] = useState(false);
-  const autoRef = useRef(false);
-  useEffect(() => {
-    if (onboarding && !autoRef.current) { autoRef.current = true; setCreating(true); }
-  }, [onboarding]);
-
-  const hasOwn = db.groups.some(g => !g.demo);
-
-  return html`<div className="min-h-screen flex flex-col">
-    <div className="max-w-2xl w-full mx-auto px-5 pt-12 pb-16 flex-1">
-      <header className="flex items-center gap-3.5">
-        <div className="w-12 h-12 rounded-2xl bg-ink flex items-center justify-center shadow-soft">
-          <span className="font-display text-paper text-[26px] font-semibold">₹</span>
-        </div>
-        <div>
-          <div className="font-display text-[27px] font-semibold leading-none">Hisaab</div>
-          <div className="text-[13px] text-muted mt-1.5">Who owes whom — at a glance.</div>
-        </div>
-      </header>
-
-      ${db.groups.length === 0 && html`<div className="mt-10 text-center border-2 border-dashed border-line rounded-3xl px-6 py-12">
-        <span className="inline-flex w-14 h-14 rounded-2xl bg-rust-tint text-rust-deep items-center justify-center"><${Icon} name="sparkle" size=${24}/></span>
-        <h2 className="mt-4 font-display text-[24px] font-semibold">Make it yours</h2>
-        <p className="mt-2 text-[14px] text-muted max-w-sm mx-auto">Create a group, add your people, and start splitting. No accounts — everything lives in this browser.</p>
-        <button onClick=${() => setCreating(true)}
-          className="mt-5 inline-flex items-center gap-2 rounded-full bg-ink text-paper px-5 py-2.5 text-[14px] font-semibold hover:bg-ink/90 transition active:scale-95">
-          <${Icon} name="plus" size=${15} sw=${2.4}/> Create your first group
-        </button>
-      </div>`}
-
-      ${db.groups.length > 0 && html`<div className="mt-10 flex items-end justify-between">
-        <h2 className="font-display text-lg font-semibold">Your groups</h2>
-        <span className="text-[13px] text-muted">${db.groups.length} group${db.groups.length === 1 ? '' : 's'}</span>
-      </div>`}
-
-      ${db.demo && db.groups.length > 0 && html`<div className="mt-3 rounded-2xl border border-line bg-card p-4 sm:p-5 shadow-soft">
-        <div className="flex items-start gap-3">
-          <span className="w-9 h-9 rounded-full bg-rust-tint text-rust-deep flex items-center justify-center shrink-0"><${Icon} name="book" size=${16}/></span>
-          <div className="flex-1 min-w-0">
-            <div className="font-display text-[16px] font-semibold">Tutorial demo</div>
-            <p className="text-[12.5px] text-muted mt-0.5">Explore the sample “Goa Trip” below — tap anything, it’s safe. When you’re ready, wipe it and build your own.</p>
-          </div>
-        </div>
-        <button onClick=${onMakeOwn}
-          className="mt-3.5 w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-ink text-paper py-2.5 text-[13.5px] font-semibold hover:bg-ink/90 transition active:scale-[.98]">
-          <${Icon} name="sparkle" size=${15}/> Make your own
-        </button>
-      </div>`}
-
-      <div className="mt-3 space-y-2.5">
-        ${db.groups.map(g => {
-          const st = groupStats(g);
-          return html`<button key=${g.id} onClick=${() => onOpen(g.id)}
-            className="w-full text-left bg-card border border-line rounded-2xl p-4 flex items-center gap-4 hover:shadow-soft hover:-translate-y-[2px] active:translate-y-0 transition-all duration-200 group">
-            <span className="w-1.5 self-stretch rounded-full shrink-0" style=${{ background: g.color }}></span>
-            <span className="flex-1 min-w-0">
-              <span className="flex items-center gap-2 min-w-0">
-                <span className="font-display text-[19px] font-semibold truncate">${g.name}</span>
-                ${g.demo && html`<span className="text-[10px] font-bold tracking-wider uppercase text-rust-deep bg-rust-tint rounded-full px-2 py-0.5 shrink-0">Tutorial</span>`}
-              </span>
-              <span className="block text-[12.5px] text-muted mt-1">
-                <span className="numtab">${g.members.length}</span> members · <span className="numtab">${fmt(st.total)}</span> spent ·
-                ${st.debts > 0
-                  ? html`<span className="text-rust font-semibold">${st.debts} open debt${st.debts === 1 ? '' : 's'}</span>`
-                  : html`<span className="text-sage-deep font-semibold">all settled</span>`}
-              </span>
-            </span>
-            <${AvStack} members=${g.members} size=${24}/>
-            <span className="text-muted group-hover:translate-x-0.5 transition-transform shrink-0"><${Icon} name="right" size=${18}/></span>
-          </button>`;
-        })}
-        <button onClick=${() => setCreating(true)}
-          className="w-full border-2 border-dashed border-line rounded-2xl p-4 flex items-center justify-center gap-2 text-muted hover:text-ink hover:border-muted transition">
-          <${Icon} name="plus" size=${16}/><span className="text-[14px] font-semibold">New group</span>
-        </button>
-      </div>
-
-      <footer className="mt-12 pt-5 border-t border-line text-[12.5px] text-muted flex items-center justify-between gap-3 flex-wrap">
-        <span>Saved in this browser · no accounts, no sync.</span>
-        ${db.demo
-          ? html`<button onClick=${onReset} className="font-semibold text-muted hover:text-rust underline underline-offset-4 decoration-line">Reset demo data</button>`
-          : html`<button onClick=${onLoadDemo} className="inline-flex items-center gap-1.5 font-semibold text-muted hover:text-ink underline underline-offset-4 decoration-line">
-              <${Icon} name="replay" size=${13}/> Load tutorial demo</button>`}
-      </footer>
-    </div>
-
-    ${creating && html`<${CreateGroupSheet} onboarding=${onboarding && !hasOwn}
-      onClose=${() => { setCreating(false); clearOnboarding(); }}
-      onCreate=${g => { setCreating(false); clearOnboarding(); onCreate(g); }}/>`}
-  </div>`;
-}
-
-/* ---------------- group view ---------------- */
-
-function GroupView({ group, actions, onBack, showToast, onMakeOwn, tourDone, markTourDone }) {
-  const [tab, setTab] = useState('balance');
-  const [selected, setSelected] = useState(null);
-  const [sheet, setSheet] = useState(null);
-  const [tour, setTour] = useState(false);
-  const [nameEdit, setNameEdit] = useState(false);
-  const [nameDraft, setNameDraft] = useState(group.name);
-
-  const { edges, net } = useMemo(() => computePairwise(group), [group]);
-  const simplified = useMemo(() => simplify(net), [net]);
-  const total = useMemo(() => group.expenses.reduce((s, e) => s + (+e.amount || 0), 0), [group.expenses]);
-  const byId = useMemo(() => Object.fromEntries(group.members.map(m => [m.id, m])), [group.members]);
-
-  const openSettle = prefill => setSheet({ type: 'settle', prefill });
-  const openEdit = e => setSheet({ type: 'expense', edit: e });
-
-  /* auto-start the guided tour once, on first visit to the demo */
-  useEffect(() => {
-    if (group.demo && !tourDone) {
-      const t = setTimeout(() => setTour(true), 700);
-      return () => clearTimeout(t);
-    }
-  }, []);
-
-  const endTour = () => { setTour(false); markTourDone(); };
-
-  const commitName = () => {
-    setNameEdit(false);
-    const v = nameDraft.trim();
-    if (v && v !== group.name) { actions.renameGroup(group.id, v); showToast('Group renamed', 'check'); }
-  };
-
-  return html`<div className="min-h-screen">
-    <div className="max-w-3xl mx-auto px-4 sm:px-6 pt-5">
-      <button onClick=${onBack} className="inline-flex items-center gap-1 text-[13.5px] font-medium text-muted hover:text-ink transition -ml-1">
-        <${Icon} name="left" size=${16}/> All groups
+      <button onClick=${onReplayTour} className="w-full flex items-center gap-2.5 rounded-2xl border border-line px-4 py-3 hover:border-muted transition">
+        <${Icon} name="replay" size=${16} className="text-muted"/>
+        <span className="text-[13.5px] font-semibold flex-1 text-left">Replay the guided tour</span>
+        <${Icon} name="right" size=${14} className="text-muted"/>
       </button>
-      <div className="mt-2.5">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <span className="w-2.5 h-2.5 rounded-full shrink-0" style=${{ background: group.color }}></span>
-          ${nameEdit
-            ? html`<input autoFocus value=${nameDraft}
-                onChange=${e => setNameDraft(e.target.value)}
-                onBlur=${commitName}
-                onKeyDown=${e => { if (e.key === 'Enter') commitName(); if (e.key === 'Escape') { setNameEdit(false); setNameDraft(group.name); } }}
-                className="font-display text-[24px] sm:text-[28px] font-semibold leading-tight bg-transparent border-b-2 border-ink outline-none w-full min-w-0"/>`
-            : html`<h1 className="font-display text-[28px] sm:text-[32px] font-semibold leading-tight truncate">${group.name}</h1>
-               <button onClick=${() => { setNameDraft(group.name); setNameEdit(true); }} aria-label="Rename group"
-                 className="p-1.5 rounded-full text-muted hover:text-ink hover:bg-paper transition shrink-0"><${Icon} name="pencil" size=${15}/></button>`}
-        </div>
-        <p className="text-[13.5px] text-muted mt-1">
-          <span className="numtab">${fmt(total)}</span> spent · ${group.expenses.length} expense${group.expenses.length === 1 ? '' : 's'} · ${group.members.length} members
-        </p>
-      </div>
-      <div className="mt-3.5 flex items-center gap-2 flex-wrap">
-        <${AvStack} members=${group.members} size=${30}/>
-        <button onClick=${() => setSheet({ type: 'members' })} aria-label="Manage members"
-          className="w-[30px] h-[30px] rounded-full border-2 border-dashed border-line text-muted hover:text-ink hover:border-muted flex items-center justify-center transition">
-          <${Icon} name="plus" size=${13} sw=${2.5}/>
-        </button>
-      </div>
 
-      ${group.demo && html`<div className="mt-4 flex flex-col sm:flex-row sm:items-center gap-3 rounded-2xl border border-line bg-card p-3.5 shadow-soft">
-        <span className="w-9 h-9 rounded-full bg-rust-tint text-rust-deep flex items-center justify-center shrink-0"><${Icon} name="book" size=${16}/></span>
-        <div className="flex-1 min-w-0">
-          <div className="text-[14px] font-semibold">Tutorial demo</div>
-          <div className="text-[12.5px] text-muted">Explore freely — nothing here is real. Start fresh whenever you like.</div>
+      <div className="bg-rust-tint/60 border border-rust/25 rounded-2xl px-4 py-3.5">
+        <div className="text-[13px] font-bold text-rust-deep">${isDemo ? 'You’re viewing the demo' : 'Danger zone'}</div>
+        <p className="text-[12.5px] text-rust-deep/80 mt-0.5">${isDemo
+          ? 'Everything here is sample data stored only in your browser.'
+          : 'This wipes all expenses and settlements in this group.'}</p>
+        <div className="mt-2.5 flex flex-wrap gap-2">
+          ${isDemo && html`<button onClick=${() => onReset('own')}
+            className="rounded-full bg-ink text-paper text-[12.5px] font-semibold px-3.5 py-2 hover:bg-ink/90 active:scale-95 transition">Start my own group</button>`}
+          <button onClick=${() => onReset(isDemo ? 'demo' : 'own')}
+            className="inline-flex items-center gap-1.5 rounded-full border border-rust/40 text-rust-deep text-[12.5px] font-semibold px-3.5 py-2 hover:bg-card transition">
+            <${Icon} name="replay" size=${13}/> ${isDemo ? 'Reset demo' : 'Wipe & start over'}
+          </button>
         </div>
-        <div className="flex gap-2 shrink-0">
-          <button onClick=${() => setTour(true)}
-            className="inline-flex items-center gap-1.5 rounded-full border border-line px-3.5 py-2 text-[13px] font-semibold hover:border-muted transition active:scale-95">
-            <${Icon} name="replay" size=${14}/> Tour</button>
-          <button onClick=${onMakeOwn}
-            className="inline-flex items-center gap-1.5 rounded-full bg-ink text-paper px-3.5 py-2 text-[13px] font-semibold hover:bg-ink/90 transition active:scale-95">
-            <${Icon} name="sparkle" size=${14}/> Make your own</button>
-        </div>
-      </div>`}
-    </div>
-
-    <div className="sticky top-0 z-30 mt-4 bg-paper/85 backdrop-blur-md border-y border-line">
-      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-2.5 flex items-center gap-2">
-        <div className="flex bg-card border border-line rounded-full p-0.5 text-[13px] font-semibold">
-          ${[['balance','Balance'],['activity','Activity']].map(([k, l]) => html`<button key=${k} id=${k === 'activity' ? 'tour-activity' : undefined}
-            onClick=${() => { setTab(k); setSelected(null); }}
-            className=${'px-3.5 sm:px-4 py-1.5 rounded-full transition ' + (tab === k ? 'bg-ink text-paper shadow-sm' : 'text-muted hover:text-ink')}>${l}</button>`)}
-        </div>
-        <div className="flex-1"></div>
-        <button onClick=${() => openSettle(null)} id="tour-settle" aria-label="Settle up"
-          className="sm:hidden inline-flex items-center justify-center w-9 h-9 rounded-full border border-line bg-card text-ink active:scale-95 transition">
-          <${Icon} name="arrLR" size=${16}/>
-        </button>
-        <button onClick=${() => openSettle(null)} id="tour-settle"
-          className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-line bg-card px-3.5 py-2 text-[13px] font-semibold hover:border-muted transition active:scale-95">
-          <${Icon} name="arrLR" size=${15}/> Settle up
-        </button>
-        <button onClick=${() => setSheet({ type: 'expense' })} id="tour-add"
-          className="inline-flex items-center gap-1.5 rounded-full bg-ink text-paper px-4 py-2 text-[13px] font-semibold shadow-sm hover:bg-ink/90 transition active:scale-95">
-          <${Icon} name="plus" size=${15} sw=${2.4}/>
-          <span className="hidden sm:inline">Add expense</span><span className="sm:hidden">Expense</span>
-        </button>
       </div>
     </div>
-
-    ${tab === 'balance'
-      ? html`<${BalanceTab} group=${group} edges=${edges} net=${net} simplified=${simplified} total=${total}
-          selected=${selected} setSelected=${setSelected} openSettle=${openSettle}/>`
-      : html`<${ActivityTab} group=${group} byId=${byId}
-          onDelete=${id => { actions.deleteExpense(group.id, id); showToast('Expense removed', 'trash'); }}
-          onEdit=${openEdit}
-          onDeleteSettlement=${id => { actions.deleteSettlement(group.id, id); showToast('Settlement removed', 'trash'); }}/>}`}
-
-    ${sheet && sheet.type === 'expense' && html`<${AddExpenseSheet} key=${sheet.edit ? 'edit-' + sheet.edit.id : 'new'}
-      group=${group} initial=${sheet.edit || null} onClose=${() => setSheet(null)}
-      onSave=${exp => {
-        if (sheet.edit) { actions.updateExpense(group.id, sheet.edit.id, exp); showToast('Expense updated', 'check'); }
-        else { actions.addExpense(group.id, exp); showToast('Expense added', 'check'); }
-        setSheet(null);
-      }}/>`}
-    ${sheet && sheet.type === 'settle' && html`<${SettleSheet} group=${group} edges=${edges} prefill=${sheet.prefill}
-      onClose=${() => setSheet(null)}
-      onSave=${s => { actions.addSettlement(group.id, s); setSheet(null); showToast('Settled up', 'check'); }}/>`}
-    ${sheet && sheet.type === 'members' && html`<${MembersSheet} group=${group} onClose=${() => setSheet(null)}
-      onAdd=${name => { actions.addMember(group.id, name); showToast(firstName(name) + ' joined the group', 'users'); }}
-      onRemove=${mid => actions.removeMember(group.id, mid)}/>`}
-
-    ${tour && html`<${Tour} steps=${TOUR_STEPS}
-      onFinish=${endTour}
-      onFinal=${() => { endTour(); onMakeOwn(); }}/>`}
-  </div>`;
+  <//>`;
 }
 
-/* ---------------- app root ---------------- */
+/* ---------------- chrome: header & bottom nav ---------------- */
+
+function Header({ group, total, demo, onSettings }) {
+  return html`<header className="sticky top-0 z-40 bg-paper/85 backdrop-blur-md border-b border-line">
+    <div className="max-w-3xl mx-auto px-4 sm:px-6 h-[60px] flex items-center gap-3">
+      <span className="w-9 h-9 rounded-2xl bg-ink text-paper flex items-center justify-center font-display font-bold text-[16px] shrink-0 shadow-soft">H</span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <h1 className="font-display text-[17px] font-semibold truncate leading-tight">${group.name}</h1>
+          ${demo && html`<span className="text-[9.5px] font-bold tracking-[.14em] uppercase bg-rust-tint text-rust-deep rounded-full px-1.5 py-0.5 shrink-0">Demo</span>`}
+        </div>
+        <div className="text-[11.5px] text-muted truncate numtab">${group.members.length} member${group.members.length === 1 ? '' : 's'} · ${fmt(total)} spent</div>
+      </div>
+      <${AvStack} members=${group.members} size=${24} max=${4}/>
+      <button onClick=${onSettings} aria-label="Group settings" className="p-2 rounded-full text-muted hover:bg-card hover:text-ink transition">
+        <${Icon} name="slider" size=${18}/>
+      </button>
+    </div>
+  </header>`;
+}
+
+function BottomNav({ tab, setTab, onAdd }) {
+  const item = (k, icon, label, id) => html`<button key=${k} id=${id} onClick=${() => setTab(k)}
+    className=${'flex flex-col items-center gap-0.5 px-6 py-1.5 rounded-2xl transition ' + (tab === k ? 'text-ink' : 'text-muted hover:text-ink')}>
+    <${Icon} name=${icon} size=${20} sw=${tab === k ? 2.4 : 2}/>
+    <span className="text-[10.5px] font-bold tracking-wide">${label}</span>
+  </button>`;
+  return html`<nav className="fixed bottom-0 inset-x-0 z-40 border-t border-line bg-card/95 backdrop-blur-md">
+    <div className="max-w-3xl mx-auto px-8 h-[64px] flex items-center justify-between relative">
+      ${item('balance', 'wallet', 'Balance')}
+      <button id="tour-add" onClick=${onAdd} aria-label="Add expense"
+        className="absolute left-1/2 -translate-x-1/2 -top-6 w-14 h-14 rounded-full bg-ink text-paper flex items-center justify-center shadow-pop border-4 border-paper transition active:scale-90 hover:bg-ink/90">
+        <${Icon} name="plus" size=${24} sw=${2.4}/>
+      </button>
+      ${item('activity', 'book', 'Activity', 'tour-activity')}
+    </div>
+  </nav>`;
+}
+
+/* ---------------- app ---------------- */
 
 function App() {
   const [db, setDb] = useState(() => {
     try {
-      const s = JSON.parse(localStorage.getItem(KEY));
-      if (s && Array.isArray(s.groups)) {
-        if (s.v === 2) return s;
-        if (s.v === 1 && s.groups.length) return { v:2, demo:false, tourDone:true, groups:s.groups };
-      }
+      const raw = localStorage.getItem(KEY);
+      if (raw) { const d = JSON.parse(raw); if (d && d.groups && d.groups.length) return d; }
     } catch (e) {}
     return freshDemoDb();
   });
   useEffect(() => { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) {} }, [db]);
 
-  const [groupId, setGroupId] = useState(() => (db.groups[0] && db.groups[0].id) || null);
+  const group = db.groups[0];
+  const [tab, setTab] = useState('balance');
+  const [selected, setSelected] = useState(null);
+  const [sheet, setSheet] = useState(null);
   const [toast, setToast] = useState(null);
-  const [confirmOwn, setConfirmOwn] = useState(false);
-  const [onboarding, setOnboarding] = useState(false);
-  const showToast = (msg, icon) => setToast({ msg, icon, key: Date.now() });
-  useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(null), 2600);
-    return () => clearTimeout(t);
-  }, [toast]);
+  const toastTimer = useRef(null);
+  const [tourOpen, setTourOpen] = useState(!db.tourDone);
 
-  const mutate = (gid, fn) => setDb(d => ({ ...d, groups: d.groups.map(g => g.id === gid ? fn(g) : g) }));
-  const actions = {
-    createGroup: g => {
-      const grp = { expenses: [], settlements: [], ...g, id: uid() };
-      setDb(d => ({ ...d, groups: [grp, ...d.groups] }));
-      setGroupId(grp.id);
-    },
-    renameGroup: (gid, name) => mutate(gid, g => ({ ...g, name })),
-    addExpense: (gid, exp) => mutate(gid, g => ({ ...g, expenses: [...g.expenses, { ...exp, id: uid() }] })),
-    updateExpense: (gid, eid, patch) => mutate(gid, g => ({ ...g, expenses: g.expenses.map(e => e.id === eid ? { ...e, ...patch } : e) })),
-    deleteExpense: (gid, eid) => mutate(gid, g => ({ ...g, expenses: g.expenses.filter(e => e.id !== eid) })),
-    addSettlement: (gid, s) => mutate(gid, g => ({ ...g, settlements: [...g.settlements, { ...s, id: uid() }] })),
-    deleteSettlement: (gid, sid) => mutate(gid, g => ({ ...g, settlements: g.settlements.filter(s => s.id !== sid) })),
-    addMember: (gid, name) => mutate(gid, g => ({ ...g, members: [...g.members, { id: uid(), name, color: AV[g.members.length % AV.length] }] })),
-    removeMember: (gid, mid) => mutate(gid, g => ({ ...g, members: g.members.filter(m => m.id !== mid) })),
+  const showToast = (msg, icon) => {
+    const key = Date.now();
+    setToast({ key, msg, icon });
+    clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 2400);
   };
 
-  const markTourDone = () => setDb(d => d.tourDone ? d : ({ ...d, tourDone: true }));
+  const byId = useMemo(() => Object.fromEntries(group.members.map(m => [m.id, m])), [group.members]);
+  const { edges, net } = useMemo(() => computePairwise(group), [group]);
+  const simplified = useMemo(() => simplify(net), [net]);
+  const total = useMemo(() => group.expenses.reduce((s, e) => s + (+e.amount || 0), 0), [group.expenses]);
 
-  const makeOwn = () => {
-    setDb(d => ({ ...d, demo: false, tourDone: true, groups: d.groups.filter(g => !g.demo) }));
-    setGroupId(null);
-    setConfirmOwn(false);
-    setOnboarding(true);
-    showToast('Fresh start — create your group', 'sparkle');
+  const patchGroup = fn => setDb(d => ({ ...d, groups: d.groups.map((g, i) => i === 0 ? fn(g) : g) }));
+
+  const saveExpense = exp => {
+    const existed = group.expenses.some(e => e.id === exp.id);
+    patchGroup(g => ({ ...g, expenses: existed ? g.expenses.map(e => e.id === exp.id ? exp : e) : [...g.expenses, exp] }));
+    setSheet(null);
+    showToast(existed ? 'Expense updated' : 'Expense added');
+  };
+  const deleteExpense = id => {
+    patchGroup(g => ({ ...g, expenses: g.expenses.filter(e => e.id !== id) }));
+    showToast('Expense deleted', 'trash');
+  };
+  const saveSettlement = s => {
+    patchGroup(g => ({ ...g, settlements: [...g.settlements, s] }));
+    setSheet(null); setSelected(null);
+    showToast('Settlement recorded');
+  };
+  const deleteSettlement = id => {
+    patchGroup(g => ({ ...g, settlements: g.settlements.filter(s => s.id !== id) }));
+    showToast('Settlement removed', 'trash');
+  };
+  const saveGroup = ({ name, members }) => {
+    patchGroup(g => ({ ...g, name, members }));
+    setSheet(null); setSelected(null);
+    showToast('Group updated');
+  };
+  const resetAll = kind => {
+    if (kind === 'demo') {
+      setDb(freshDemoDb());
+      showToast('Demo restored', 'replay');
+    } else {
+      setDb({ v: 2, demo: false, tourDone: true, groups: [{
+        id: uid(), name: 'My group', color: '#48764F',
+        members: [{ id: uid(), name: 'You', color: AV[0] }],
+        expenses: [], settlements: [],
+      }] });
+      showToast('Fresh start — add your crew!', 'sparkle');
+    }
+    setSheet(null); setSelected(null); setTab('balance');
   };
 
-  const loadDemo = () => {
-    const g = seedGroup();
-    setDb(d => ({ v:2, demo:true, tourDone:false, groups:[g, ...d.groups.filter(x => !x.demo)] }));
-    setGroupId(g.id);
-    showToast('Tutorial demo loaded', 'book');
+  const finishTour = () => {
+    setTourOpen(false);
+    setDb(d => d.tourDone ? d : { ...d, tourDone: true });
   };
+  const finalTour = () => { finishTour(); setSheet({ type:'group' }); };
 
-  const resetAll = () => {
-    const s = freshDemoDb();
-    setDb(s);
-    setGroupId(s.groups[0].id);
-    setOnboarding(false);
-    showToast('Demo data restored', 'clock');
-  };
+  const openSettle = preset => setSheet({ type:'settle', preset });
+  const openAdd = initial => setSheet(initial ? { type:'add', initial } : { type:'add' });
 
-  const group = db.groups.find(g => g.id === groupId) || null;
+  return html`<div className="min-h-screen bg-paper text-ink font-sans antialiased flex flex-col">
+    <${Header} group=${group} total=${total} demo=${db.demo} onSettings=${() => setSheet({ type:'group' })}/>
 
-  return html`<div className="min-h-screen">
-    ${group
-      ? html`<${GroupView} key=${group.id} group=${group} actions=${actions} onBack=${() => setGroupId(null)}
-          showToast=${showToast} onMakeOwn=${() => setConfirmOwn(true)}
-          tourDone=${db.tourDone} markTourDone=${markTourDone}/>`
-      : html`<${Home} db=${db} onOpen=${setGroupId}
-          onCreate=${g => { actions.createGroup(g); setOnboarding(false); }}
-          onReset=${resetAll}
-          onLoadDemo=${loadDemo}
-          onMakeOwn=${() => setConfirmOwn(true)}
-          onboarding=${onboarding} clearOnboarding=${() => setOnboarding(false)}/>`}
+    <main className="flex-1">
+      ${tab === 'balance'
+        ? html`<${BalanceTab} group=${group} edges=${edges} net=${net} simplified=${simplified} total=${total}
+            selected=${selected} setSelected=${setSelected} openSettle=${openSettle}/>`
+        : html`<${ActivityTab} group=${group} byId=${byId}
+            onDelete=${deleteExpense} onEdit=${openAdd} onDeleteSettlement=${deleteSettlement}/>`}
+    </main>
 
-    ${confirmOwn && html`<${ConfirmOwnSheet}
-      hasOwn=${db.groups.some(g => !g.demo)}
-      onClose=${() => setConfirmOwn(false)}
-      onConfirm=${makeOwn}/>`}
+    <${Footer}/>
+
+    <${BottomNav} tab=${tab} setTab=${k => { setTab(k); setSelected(null); }} onAdd=${() => openAdd()}/>
+
+    ${sheet && sheet.type === 'add' && html`<${AddExpenseSheet} key=${sheet.initial ? sheet.initial.id : 'new'}
+      group=${group} initial=${sheet.initial} onClose=${() => setSheet(null)} onSave=${saveExpense}/>`}
+    ${sheet && sheet.type === 'settle' && html`<${SettleSheet} key=${sheet.preset ? (sheet.preset.from + '>' + sheet.preset.to + sheet.preset.amount) : 'free'}
+      group=${group} preset=${sheet.preset} onClose=${() => setSheet(null)} onSave=${saveSettlement}/>`}
+    ${sheet && sheet.type === 'group' && html`<${GroupSheet} group=${group} isDemo=${db.demo}
+      onClose=${() => setSheet(null)} onSaveGroup=${saveGroup} onReset=${resetAll}
+      onReplayTour=${() => { setSheet(null); setTourOpen(true); }}/>`}
 
     <${ToastView} toast=${toast}/>
+    ${tourOpen && html`<${Tour} steps=${TOUR_STEPS} onFinish=${finishTour} onFinal=${finalTour}/>`}
   </div>`;
 }
 
