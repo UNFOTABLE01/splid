@@ -1,7 +1,6 @@
 # Hisaab
 https://splid.splid.workers.dev/
-![Uploading Hisaab — Ad (16 9, detailed)@2x.png…]()
-
+<img width="3200" height="1800" alt="Hisaab — Ad (16 9, detailed)@2x" src="https://github.com/user-attachments/assets/94b6b43b-7df0-47f2-b964-09572814b3fc" />
 
 **Who owes whom, at a glance.**
 
@@ -17,16 +16,6 @@ Hisaab is a lightweight, no-backend expense-splitting app for groups — trips, 
 - **Activity timeline** — a chronological story of every expense and settlement, editable and deletable
 - **Guided tour** — a built-in coach-mark walkthrough for first-time users, backed by seeded demo data
 - **Zero backend** — all data is persisted to `localStorage`; nothing leaves the browser
-
-## Tech stack
-
-- [React 18](https://react.dev/) (UMD build, no bundler)
-- [htm](https://github.com/developit/htm) — JSX-style templating without a build step
-- [Tailwind CSS](https://tailwindcss.com/) via the Play CDN, with a custom theme (colors, fonts, shadows)
-- Hand-rolled SVG for the balance graph, icons, and animations
-- Fonts: Fraunces (display) and Instrument Sans (body), via Google Fonts
-
-No build tooling, no package manager, no server — the app runs entirely as static files.
 
 ## Getting started
 
