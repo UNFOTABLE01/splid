@@ -36,6 +36,11 @@ tailwind.config = {
   button{touch-action:manipulation}
   html{color-scheme:light}
   ::selection{background:#26221B;color:#F6F1E8}
+  .dotbg{
+    background-color:#F6F1E8;
+    background-image:radial-gradient(rgba(38,34,27,.12) 1.2px,transparent 1.2px);
+    background-size:22px 22px;
+  }
   .numtab{font-variant-numeric:tabular-nums lining-nums}
   .font-display{font-optical-sizing:auto}
   .lbl{display:block;font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#7D7463;margin-bottom:8px}
@@ -1579,7 +1584,7 @@ function App() {
   const openSettle = preset => setSheet({ type:'settle', preset });
   const openAdd = initial => setSheet(initial ? { type:'add', initial } : { type:'add' });
 
-  return html`<div className="min-h-screen bg-paper text-ink font-sans antialiased flex flex-col">
+  return html`<div className="min-h-screen dotbg text-ink font-sans antialiased flex flex-col">
     <${Header} group=${group} total=${total} demo=${db.demo} onSettings=${() => setSheet({ type:'group' })}
       onSheet=${() => downloadTripSheet(group, m => showToast(m, 'check'))}/>
 
