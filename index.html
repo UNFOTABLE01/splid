@@ -12,8 +12,8 @@ tailwind.config = {
   theme: { extend: {
     colors: {
       paper:'#F6F1E8', card:'#FCF9F3', ink:'#26221B', muted:'#7D7463', line:'#E6DCC6',
-      rust:{DEFAULT:'#AE4E2E', deep:'#8C3B20', tint:'#F5E3D7'},
-      sage:{DEFAULT:'#48764F', deep:'#35603D', tint:'#E3EEE0'},
+      rust:{DEFAULT:'#E14B4F', deep:'#B93539', tint:'#FDE9E9'},
+      sage:{DEFAULT:'#2BB65E', deep:'#1D8A48', tint:'#DFF6E6'},
     },
     fontFamily: {
       display:['Fraunces','Georgia','serif'],
@@ -47,15 +47,22 @@ tailwind.config = {
   .sheet-in{animation:sheetUp .36s cubic-bezier(.32,.72,.24,1) both}
   @keyframes fadeIn{from{opacity:0}to{opacity:1}}
   .backdrop-in{animation:fadeIn .22s ease both}
-  @keyframes draw{to{stroke-dashoffset:0}}
-  .edge-main{stroke-dasharray:640;stroke-dashoffset:640;animation:draw .9s .15s cubic-bezier(.55,.06,.25,1) forwards}
-  @keyframes flow{to{stroke-dashoffset:-48}}
-  @keyframes fadeFlow{from{opacity:0}to{opacity:.85}}
-  .edge-flow{opacity:0;animation:flow 1.4s linear infinite, fadeFlow .6s .9s ease forwards}
-  @keyframes pop{from{transform:scale(.4);opacity:0}to{transform:scale(1);opacity:1}}
-  .node-pop{animation:pop .55s cubic-bezier(.34,1.56,.64,1) both}
+  @keyframes barUp{from{transform:scaleY(.03)}to{transform:scaleY(1)}}
+  .bar-up{transform-origin:bottom;animation:barUp .65s cubic-bezier(.22,.9,.3,1) both}
+  @keyframes donutIn{from{transform:scale(.82) rotate(-10deg);opacity:0}60%{transform:scale(1.03) rotate(2deg);opacity:1}to{transform:scale(1) rotate(0)}}
+  .donut-in{animation:donutIn .5s cubic-bezier(.34,1.3,.5,1) both}
   @keyframes rise{from{transform:translateY(10px);opacity:0}to{transform:none;opacity:1}}
   .rise{animation:rise .45s cubic-bezier(.22,.9,.3,1) both}
+
+  @keyframes ppDrop{0%{transform:translateY(-12px) scale(.3) rotate(-24deg);opacity:0}62%{transform:translateY(2px) scale(1.1) rotate(3deg);opacity:1}100%{transform:translateY(0) scale(1) rotate(0)}}
+  .pp-face{animation:ppDrop .5s cubic-bezier(.34,1.56,.64,1) both;transition:left .32s cubic-bezier(.22,.9,.3,1)}
+  .pp-rail{transition:width .32s cubic-bezier(.22,.9,.3,1)}
+  @keyframes ppCardIn{0%{transform:scale(.88,.72);opacity:0}62%{transform:scale(1.015,1.008);opacity:1}100%{transform:scale(1,1)}}
+  .pp-card{transform-origin:top left;animation:ppCardIn .4s cubic-bezier(.34,1.3,.5,1) both}
+  @keyframes ppRowIn{from{transform:translateY(-8px);opacity:0}to{transform:translateY(0);opacity:1}}
+  .pp-row-in{animation:ppRowIn .38s cubic-bezier(.22,.9,.3,1) both}
+  @keyframes ppTickIn{0%{transform:scale(.3);opacity:0}68%{transform:scale(1.18);opacity:1}100%{transform:scale(1);opacity:1}}
+  .pp-tick{display:inline-flex;animation:ppTickIn .34s cubic-bezier(.34,1.56,.64,1) both}
   @keyframes toastIn{from{transform:translateY(16px);opacity:0}to{transform:none;opacity:1}}
   .toast-in{animation:toastIn .32s cubic-bezier(.2,1.1,.4,1) both}
 
@@ -72,6 +79,7 @@ tailwind.config = {
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/htm@3.1.1/dist/htm.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 
 <body class="bg-paper text-ink font-sans antialiased">
@@ -84,17 +92,17 @@ const html = htm.bind(React.createElement);
 
 /* ---------------- constants & helpers ---------------- */
 
-const KEY = 'hisaab.v2';
+const KEY = 'hisaab.v4';
 const uid = () => Math.random().toString(36).slice(2, 10);
 const P = d => ({ t:'p', d });
 
-const AV = ['#BF6A50','#5F8A6F','#687FA8','#B08A3E','#8F6B97','#4E8A80','#A85D5D','#7A7A52'];
+const AV = ['#4283F2','#E95EC0','#3FCE6E','#EE5458','#9A5CF5','#22B8D4','#F27A3C','#DE9A2E'];
 
 const CATS = {
-  food:   { label:'Food',   icon:'food',   fg:'#8F6512', tint:'#F2E6C8' },
-  travel: { label:'Travel', icon:'travel', fg:'#2F675E', tint:'#DCEAE4' },
-  stay:   { label:'Stay',   icon:'stay',   fg:'#6C4B75', tint:'#EBE1EF' },
-  misc:   { label:'Misc',   icon:'misc',   fg:'#6B6350', tint:'#EAE3D2' },
+  food:   { label:'Food',   icon:'food',   fg:'#C43A3E', tint:'#FDE7E7' },
+  travel: { label:'Travel', icon:'travel', fg:'#2563C9', tint:'#E3EDFE' },
+  stay:   { label:'Stay',   icon:'stay',   fg:'#1E9E52', tint:'#DFF7E7' },
+  misc:   { label:'Misc',   icon:'misc',   fg:'#B93A98', tint:'#FBE3F5' },
 };
 
 const ICONS = {
@@ -119,6 +127,7 @@ const ICONS = {
   pencil:[P('M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z')],
   sparkle:[P('M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9Z'),P('M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9Z')],
   book:[P('M4 19.5A2.5 2.5 0 0 1 6.5 17H20'),P('M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z')],
+  sheet:[P('M3 5.5A1.5 1.5 0 0 1 4.5 4h15A1.5 1.5 0 0 1 21 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5v-13Z'),P('M3 9.5h18'),P('M9.5 9.5V20'),P('M15.5 9.5V20')],
   replay:[P('M3 12a9 9 0 1 0 9-9 9.7 9.7 0 0 0-6.74 2.74L3 8'),P('M3 3v5h5')],
   users:[P('M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2'),{t:'c',cx:9.5,cy:7,r:4},P('M22 21v-2a4 4 0 0 0-3-3.87'),P('M15.5 3.13a4 4 0 0 1 0 7.75')],
   github:[P('M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4'),P('M9 18c-4.51 2-5-2-7-2')],
@@ -232,6 +241,123 @@ function groupStats(g) {
   return { total, debts: edges.length };
 }
 
+/* ---------------- trip sheet (excel export) ---------------- */
+
+const sheetDate = ts => new Date(ts).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' });
+
+function buildTripAoas(group) {
+  const { edges, net } = computePairwise(group);
+  const byId = Object.fromEntries(group.members.map(m => [m.id, m]));
+  const nm = id => (byId[id] && byId[id].name) || '?';
+  const exps = [...group.expenses].sort((a, b) => b.date - a.date);
+  const sets = [...(group.settlements || [])].sort((a, b) => b.date - a.date);
+  const total = exps.reduce((s, e) => s + (+e.amount || 0), 0);
+  const SPLIT_LBL = { equal:'Equal', custom:'Custom', pct:'Percentage' };
+
+  /* sheet 1 — summary */
+  const summary = [], numCells = [];
+  const add = (arr, nums) => { const ri = summary.length; (nums || []).forEach(c => numCells.push([ri, c])); summary.push(arr); };
+  add([(group.name || 'Trip').toUpperCase() + ' — TRIP SHEET']);
+  add(['Full history record · auto-built from live trip data · made with Splid']);
+  add(['Generated ' + sheetDate(Date.now()) + ' · ' + group.members.length + ' members · ' + exps.length + ' expenses · ' + sets.length + ' settlements']);
+  add([]);
+  add(['TOTAL SPEND', round2(total)], [1]);
+  add(['OPEN DEBTS (PAIRWISE)', edges.length], [1]);
+  add([]);
+  add(['MEMBER', 'PAID (INR)', 'OWN SHARE (INR)', 'NET BALANCE (INR)', 'STATUS']);
+  for (const m of group.members) {
+    const st = memberStat(group, m.id);
+    const n = round2(net[m.id] || 0);
+    add([m.name, round2(st.paid), round2(st.share), n, n > 0.005 ? 'gets back' : n < -0.005 ? 'owes' : 'settled'], [1, 2, 3]);
+  }
+  add([]);
+  add(['WHO OWES WHOM — SETTLE-UP PLAN']);
+  const plan = simplify(net);
+  if (plan.length) {
+    add(['FROM', 'TO', 'AMOUNT (INR)']);
+    for (const t of plan) add([nm(t.from), nm(t.to), round2(t.amount)], [2]);
+  } else add(['Everyone is settled up.']);
+
+  /* sheet 2 — expenses */
+  const expenseRows = [['DATE', 'EXPENSE', 'CATEGORY', 'PAID BY', 'AMOUNT (INR)', 'SPLIT', 'SHARES DETAIL']];
+  for (const e of exps) {
+    const shares = Object.entries(e.splits || {})
+      .filter(([, v]) => (+v || 0) > 0.004)
+      .map(([id, v]) => firstName(byId[id] ? byId[id].name : '?') + ' ' + fmt(+v))
+      .join(' · ');
+    expenseRows.push([sheetDate(e.date), e.desc || 'Expense', (CATS[e.category] && CATS[e.category].label) || 'Misc',
+      nm(e.payerId), round2(+e.amount || 0), SPLIT_LBL[e.splitType] || 'Custom', shares]);
+  }
+  expenseRows.push([]);
+  expenseRows.push(['TOTAL', '', '', '', round2(total)]);
+
+  /* sheet 3 — settlements */
+  const settleRows = [['DATE', 'FROM (PAID)', 'TO (RECEIVED)', 'AMOUNT (INR)', 'TYPE']];
+  if (!sets.length) settleRows.push(['No settlements recorded yet.']);
+  for (const s of sets) settleRows.push([sheetDate(s.date), nm(s.fromId), nm(s.toId), round2(+s.amount || 0), s.full ? 'Full' : 'Part']);
+
+  return { summary, numCells, expenseRows, settleRows };
+}
+
+function aoasToWorkbook(a) {
+  const wb = XLSX.utils.book_new();
+  const ws1 = XLSX.utils.aoa_to_sheet(a.summary);
+  ws1['!cols'] = [{ wch:30 }, { wch:15 }, { wch:17 }, { wch:19 }, { wch:12 }];
+  ws1['!merges'] = [0, 1, 2].map(r => ({ s:{ r, c:0 }, e:{ r, c:4 } }));
+  for (const [r, c] of a.numCells) {
+    const cell = ws1[XLSX.utils.encode_cell({ r, c })];
+    if (cell && typeof cell.v === 'number') cell.z = '#,##0.00';
+  }
+  XLSX.utils.book_append_sheet(wb, ws1, 'Summary');
+
+  const ws2 = XLSX.utils.aoa_to_sheet(a.expenseRows);
+  ws2['!cols'] = [{ wch:13 }, { wch:26 }, { wch:11 }, { wch:13 }, { wch:14 }, { wch:12 }, { wch:52 }];
+  for (let r = 1; r < a.expenseRows.length; r++) {
+    const cell = ws2[XLSX.utils.encode_cell({ r, c:4 })];
+    if (cell && typeof cell.v === 'number') cell.z = '#,##0.00';
+  }
+  XLSX.utils.book_append_sheet(wb, ws2, 'Expenses');
+
+  const ws3 = XLSX.utils.aoa_to_sheet(a.settleRows);
+  ws3['!cols'] = [{ wch:13 }, { wch:16 }, { wch:17 }, { wch:14 }, { wch:10 }];
+  for (let r = 1; r < a.settleRows.length; r++) {
+    const cell = ws3[XLSX.utils.encode_cell({ r, c:3 })];
+    if (cell && typeof cell.v === 'number') cell.z = '#,##0.00';
+  }
+  XLSX.utils.book_append_sheet(wb, ws3, 'Settlements');
+  return wb;
+}
+
+function tripFileName(group, ext) {
+  const safe = (group.name || 'trip').trim().replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'trip';
+  return safe + '-sheet-' + new Date().toISOString().slice(0, 10) + '.' + ext;
+}
+
+function downloadTripSheet(group, notify) {
+  try {
+    if (typeof XLSX === 'undefined') throw new Error('xlsx-missing');
+    XLSX.writeFile(aoasToWorkbook(buildTripAoas(group)), tripFileName(group, 'xlsx'));
+    const n = group.expenses.length;
+    notify('Trip sheet downloaded · ' + (n === 1 ? '1 expense' : n + ' expenses'));
+  } catch (err) {
+    try {
+      const a = buildTripAoas(group);
+      const esc = v => { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+      const lines = ['SUMMARY'];
+      a.summary.forEach(r => lines.push(r.map(esc).join(',')));
+      lines.push('', 'EXPENSES');
+      a.expenseRows.forEach(r => lines.push(r.map(esc).join(',')));
+      lines.push('', 'SETTLEMENTS');
+      a.settleRows.forEach(r => lines.push(r.map(esc).join(',')));
+      const el = document.createElement('a');
+      el.href = URL.createObjectURL(new Blob(['\uFEFF' + lines.join('\r\n')], { type:'text/csv;charset=utf-8' }));
+      el.download = tripFileName(group, 'csv');
+      document.body.appendChild(el); el.click(); el.remove();
+      notify('Saved as CSV — Excel export needs internet once');
+    } catch (err2) { notify('Could not build the sheet'); }
+  }
+}
+
 /* ---------------- seed demo data ---------------- */
 
 function seedGroup() {
@@ -240,7 +366,7 @@ function seedGroup() {
   const a = mk('Aisha', 0), r = mk('Rohan', 1), me = mk('Meera', 2), d = mk('Dev', 3);
   const all = [a.id, r.id, me.id, d.id];
   return {
-    id: uid(), name: 'Goa Trip', color: '#BF6A50', demo: true, members: [a, r, me, d],
+    id: uid(), name: 'Goa Trip', color: '#4283F2', demo: true, members: [a, r, me, d],
     expenses: [
       { id: uid(), desc: 'Beach shack dinner', amount: 3200, payerId: a.id, category: 'food',   splitType: 'equal', date: now - 2.8 * D, splits: equalShares(3200, all) },
       { id: uid(), desc: 'Scooter rental · 2 days', amount: 1600, payerId: r.id, category: 'travel', splitType: 'custom', date: now - 2.4 * D, splits: { [a.id]: 400, [r.id]: 600, [me.id]: 0, [d.id]: 600 } },
@@ -251,7 +377,7 @@ function seedGroup() {
     settlements: [],
   };
 }
-const freshDemoDb = () => ({ v: 2, demo: true, tourDone: false, groups: [seedGroup()] });
+const freshDemoDb = () => ({ v: 3, demo: true, tourDone: false, groups: [seedGroup()] });
 
 /* ---------------- tiny hooks ---------------- */
 
@@ -290,6 +416,63 @@ function AvStack({ members, size = 26, max = 5 }) {
     ${shown.map((m, i) => html`<span key=${m.id} className="relative" style=${{ zIndex: 20 - i, marginLeft: i > 0 ? -size * .3 : 0 }}><${Avatar} m=${m} size=${size}/></span>`)}
     ${members.length > max && html`<span className="relative rounded-full bg-card border border-line text-muted font-bold flex items-center justify-center"
       style=${{ width:size, height:size, fontSize:10, zIndex:1, marginLeft:-size * .3 }}>+${members.length - max}</span>`}
+  </div>`;
+}
+
+/* ---------------- people pill · faces fill the pill as you assign ---------------- */
+
+function PeoplePill({ members, selected, onToggle, single, emptyLabel, sub }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const h = e => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, [open]);
+
+  const FACE = 30, LAP = 11;
+  const picked = members.filter(m => selected.includes(m.id));
+  const n = picked.length;
+  const rail = single ? (n ? FACE + 4 : 0) : (n ? FACE + (n - 1) * (FACE - LAP) : 0);
+
+  return html`<div className="relative" ref=${wrapRef}>
+    <button type="button" onClick=${() => setOpen(v => !v)} aria-expanded=${open} aria-haspopup="listbox"
+      className="inline-flex items-center gap-2 rounded-full border border-line bg-card pl-1.5 pr-3 py-[5px] shadow-soft hover:border-muted transition">
+      ${single
+        ? (picked[0]
+          ? html`<span className="flex items-center gap-2">
+              <${Avatar} m=${picked[0]} size=${28}/>
+              <span className="text-[13.5px] font-semibold pr-0.5">${firstName(picked[0].name)}</span>
+            </span>`
+          : html`<span className="text-[13px] font-semibold text-muted px-1.5 py-1">${emptyLabel}</span>`)
+        : html`<span className="pp-rail relative block h-[30px]" style=${{ width: rail }}>
+            ${picked.map((m, i) => html`<span key=${m.id} className="pp-face absolute top-0" style=${{ left: i * (FACE - LAP), zIndex: 30 - i }}><${Avatar} m=${m} size=${FACE}/></span>`)}
+          </span>`}
+      ${!single && n === 0 && html`<span className="text-[13px] font-semibold text-muted">${emptyLabel}</span>`}
+      <span className=${'text-muted transition-transform duration-300 ' + (open ? 'rotate-180' : '')}><${Icon} name="down" size=${15}/></span>
+    </button>
+
+    ${open && html`<div className="pp-card mt-2 w-full bg-card border border-line rounded-3xl shadow-pop overflow-hidden" role="listbox">
+      <div className="max-h-[236px] overflow-y-auto p-1.5">
+        ${members.map((m, i) => {
+          const on = selected.includes(m.id);
+          return html`<button key=${m.id} type="button" role="option" aria-selected=${on} onClick=${() => onToggle(m.id)}
+            className=${'pp-row-in w-full flex items-center gap-2.5 rounded-2xl px-2.5 py-2 text-left transition ' + (on ? 'bg-paper' : 'hover:bg-paper/60')}
+            style=${{ animationDelay: (i * 40 + 30) + 'ms' }}>
+            <${Avatar} m=${m} size=${32}/>
+            <span className="flex-1 min-w-0">
+              <span className="block text-[13.5px] font-semibold truncate">${m.name}</span>
+              ${sub && html`<span className="block text-[12px] text-muted numtab">${sub(m)}</span>`}
+            </span>
+            <span className=${'w-[22px] h-[22px] rounded-full border flex items-center justify-center shrink-0 transition ' + (on ? 'bg-sage border-sage text-paper' : 'border-muted/40')}>
+              ${on && html`<span className="pp-tick"><${Icon} name="check" size=${13} sw=${3}/></span>`}
+            </span>
+          </button>`;
+        })}
+      </div>
+    </div>`}
   </div>`;
 }
 
@@ -345,7 +528,10 @@ function Footer() {
       </a>
       <p className="text-[12px] text-muted leading-relaxed">
         Developed &amp; managed by
-        <span className="inline-block ml-1.5 font-display font-bold tracking-[.16em] text-[11.5px] text-ink/90 uppercase border-b-2 border-rust/50 pb-[1px]">Afterdark</span>
+        <span className="inline-flex items-baseline align-[-2px] ml-2 rounded-md bg-ink px-2.5 py-[5px] shadow-soft">
+          <span className="font-display font-bold tracking-[.18em] text-[11.5px] leading-none text-paper uppercase">UNFTABLE</span>
+          <span className="ml-[3px] font-display font-bold text-[15px] leading-none text-[#3DDC5C]">.</span>
+        </span>
       </p>
       <p className="text-[11px] text-muted/60">© ${new Date().getFullYear()} Hisaab · who owes whom, at a glance</p>
     </div>
@@ -355,7 +541,7 @@ function Footer() {
 /* ---------------- guided tour (coach marks) ---------------- */
 
 const TOUR_STEPS = [
-  { target:'tour-graph', title:"The balance graph", body:"Every arrow is a live debt — who owes whom, and how much. A thicker arrow means a bigger amount. Tap any person or arrow to dig in." },
+  { target:'tour-graph', title:"Total spend, at a glance", body:"Every bar is a day of this trip, stacked by category — tap any bar for its breakdown. Flip to the 3D view to see the whole trip split by category." },
   { target:'tour-toggle', title:"Direct vs Simplified", body:"\u201CDirect\u201D shows real person-to-person debts. \u201CSimplified\u201D computes the fewest payments that clear everything." },
   { target:'tour-settle', title:"Settle up in one tap", body:"When someone pays you back, record it — fully or partially. The graph, balances and history update instantly." },
   { target:'tour-add', title:"Three taps to log an expense", body:"Amount \u2192 who paid \u2192 Add. Equal split is the default; switch to sliders or percentages anytime." },
@@ -453,150 +639,203 @@ function Tour({ steps, onFinish, onFinal }) {
   </div>`;
 }
 
-/* ---------------- the balance graph (custom SVG) ---------------- */
+/* ---------------- total spend chart · graph + 3D views ---------------- */
 
-function edgeGeom(a, b, CX, CY) {
-  const dx = b.x - a.x, dy = b.y - a.y;
-  const dist = Math.hypot(dx, dy) || 1;
-  const ux = dx / dist, uy = dy / dist;
-  let px = -uy, py = ux;
-  const mx = (a.x + b.x) / 2 - CX, my = (a.y + b.y) / 2 - CY;
-  if (px * mx + py * my < 0) { px = -px; py = -py; }
-  const bow = Math.min(46, dist * 0.18);
-  const s = { x: a.x + ux * (a.r + 6) + px * bow * .4, y: a.y + uy * (a.r + 6) + py * bow * .4 };
-  const e = { x: b.x - ux * (b.r + 14) + px * bow * .4, y: b.y - uy * (b.r + 14) + py * bow * .4 };
-  const c = { x: (a.x + b.x) / 2 + px * bow, y: (a.y + b.y) / 2 + py * bow };
-  const mid = { x: .25 * s.x + .5 * c.x + .25 * e.x, y: .25 * s.y + .5 * c.y + .25 * e.y };
-  const ang = Math.atan2(e.y - c.y, e.x - c.x);
-  return {
-    s, c, e, mid, ang, px, py,
-    d: `M ${s.x.toFixed(1)} ${s.y.toFixed(1)} Q ${c.x.toFixed(1)} ${c.y.toFixed(1)} ${e.x.toFixed(1)} ${e.y.toFixed(1)}`,
-  };
-}
-function qpt(g, t) {
-  const u = 1 - t;
-  return { x: u * u * g.s.x + 2 * u * t * g.c.x + t * t * g.e.x, y: u * u * g.s.y + 2 * u * t * g.c.y + t * t * g.e.y };
-}
-function qdist(g, t, cx, cy) { const p = qpt(g, t); return Math.hypot(p.x - cx, p.y - cy); }
-function arrowPts(g) {
-  const L = 10, Wd = 7;
-  const bx = g.e.x - Math.cos(g.ang) * L, by = g.e.y - Math.sin(g.ang) * L;
-  const nx = -Math.sin(g.ang), ny = Math.cos(g.ang);
-  return `${g.e.x.toFixed(1)},${g.e.y.toFixed(1)} ${(bx + nx * Wd).toFixed(1)},${(by + ny * Wd).toFixed(1)} ${(bx - nx * Wd).toFixed(1)},${(by - ny * Wd).toFixed(1)}`;
-}
+const CAT_BAR = {
+  food: '#EE5458', travel: '#4283F2', stay: '#3FCE6E', misc: '#E95EC0',
+};
 
-function BalanceGraph({ members, edges, simplified, net, total, expenseCount, mode, selected, onNodeClick, onEdgeClick }) {
-  const [hover, setHover] = useState(null);
-  const W = 480, H = 456, CX = 240, CY = 214;
+const shade = (hex, k) => {
+  const n = parseInt(hex.slice(1), 16);
+  const f = c => Math.max(0, Math.min(255, Math.round(c * (1 + k))));
+  return '#' + ((1 << 24) + (f(n >> 16) << 16) + (f((n >> 8) & 255) << 8) + f(n & 255)).toString(16).slice(1);
+};
 
-  const layout = useMemo(() => {
-    const n = members.length;
-    const R = n <= 4 ? 150 : n <= 6 ? 136 : 120;
-    const pos = {};
-    members.forEach((m, i) => {
-      const ang = n === 2 ? (i === 0 ? 180 : 0) : -90 + i * 360 / n;
-      const rad = ang * Math.PI / 180;
-      pos[m.id] = { x: CX + R * Math.cos(rad), y: CY + R * Math.sin(rad), r: 27 };
-    });
-    return { pos, R };
-  }, [members]);
+function SpendChart({ group }) {
+  const [view, setView] = useState('graph');
+  const [hot, setHot] = useState(null);
+  const [hoverCat, setHoverCat] = useState(null);
+  const H = 150;
 
-  const useEdges = mode === 'direct' ? edges : simplified;
-  const maxAmt = Math.max(1, ...useEdges.map(e => e.amount));
-  const eNodes = useEdges
-    .map(e => ({ ...e, key: e.from + '>' + e.to }))
-    .filter(e => layout.pos[e.from] && layout.pos[e.to]);
+  const data = useMemo(() => {
+    const exps = group.expenses || [];
+    const total = exps.reduce((s, e) => s + (+e.amount || 0), 0);
+    const n = exps.length;
+    if (!n) return { list: [], total, n, first: null, unit: 'day' };
+    const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+    const today = t0.getTime();
+    const day0 = ts => { const d = new Date(ts); d.setHours(0, 0, 0, 0); return d.getTime(); };
+    const firstD = day0(Math.min(...exps.map(e => e.date)));
+    let unit = 'day', span = Math.round((today - firstD) / 864e5) + 1, start, size;
+    if (span > 45) { unit = 'week'; size = 7 * 864e5; start = firstD; span = Math.floor((today - firstD) / size) + 1; }
+    else { size = 864e5; span = Math.max(12, span); start = today - (span - 1) * size; }
+    const arr = [];
+    for (let i = 0; i < span; i++) arr.push({ start: start + i * size, total: 0, byCat: {} });
+    for (const e of exps) {
+      const ci = Math.min(span - 1, Math.max(0, Math.floor((e.date - start) / size)));
+      const amt = +e.amount || 0;
+      arr[ci].total += amt;
+      const c = e.category || 'misc';
+      arr[ci].byCat[c] = (arr[ci].byCat[c] || 0) + amt;
+    }
+    return { list: arr, total, n, first: firstD, unit };
+  }, [group.expenses]);
 
-  const focusN = (hover && hover.t === 'n') ? hover.id : (selected || null);
-  const focusE = (hover && hover.t === 'e') ? hover.id : null;
-  const edgeDim = e => focusE ? (e.key === focusE ? 1 : .1)
-    : focusN ? ((e.from === focusN || e.to === focusN) ? 1 : .08) : 1;
-  const nodeDim = id => {
-    if (focusE) { const e = eNodes.find(x => x.key === focusE); return e && (e.from === id || e.to === id) ? 1 : .4; }
-    if (focusN) return focusN === id ? 1 : .45;
-    return 1;
-  };
+  const list = data.list;
+  const max = Math.max(1, ...list.map(d => d.total));
+  const totalAnim = useCountUp(data.total);
+  const fmtDay = ts => new Date(ts).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+  const isToday = ts => new Date(ts).toDateString() === new Date().toDateString();
+  const axis = list.length ? [list[0].start, list[Math.floor((list.length - 1) / 2)].start, list[list.length - 1].start] : [];
+  const cats = Object.keys(CAT_BAR)
+    .map(c => ({ cat: c, value: (group.expenses || []).reduce((s, e) => s + ((e.category || 'misc') === c ? +e.amount || 0 : 0), 0) }))
+    .filter(d => d.value > 0);
+  const tipLabel = d => data.unit === 'day' ? dayLabel(d.start) : 'Week of ' + fmtDay(d.start);
 
-  const settledAll = eNodes.length === 0;
-  const totalAnim = useCountUp(total);
+  return html`<div>
+    <div className="flex items-start justify-between gap-3 px-4 sm:px-5 pt-4">
+      <div className="min-w-0">
+        <div className="text-[11px] font-bold tracking-[.16em] uppercase text-muted">Total spend</div>
+        <div className="text-[12.5px] text-muted mt-0.5 truncate">${group.name} · ${data.n ? 'since ' + fmtDay(data.first) : 'no expenses yet'}</div>
+      </div>
+      <div className="flex bg-paper border border-line rounded-full p-0.5 text-[12px] font-semibold shrink-0">
+        ${[['graph', 'Graph'], ['donut', '3D']].map(([k, l]) => html`<button key=${k} onClick=${() => { setView(k); setHot(null); setHoverCat(null); }}
+          className=${'px-3.5 py-1.5 rounded-full transition ' + (view === k ? 'bg-ink text-paper' : 'text-muted hover:text-ink')}>${l}</button>`)}
+      </div>
+    </div>
 
-  return html`<div className="px-1 pb-1">
-    <svg viewBox="0 0 480 456" display="block" role="img" aria-label="Balance graph"
-      className="w-full h-auto select-none" style=${{ fontFamily:'"Instrument Sans",sans-serif' }}>
-      <defs>
-        <pattern id="gdots" width="26" height="26" patternUnits="userSpaceOnUse">
-          <circle cx="1.4" cy="1.4" r="1.1" fill="#E7DEC9"/>
-        </pattern>
-      </defs>
-      <rect width="480" height="456" fill="url(#gdots)" opacity=".5"/>
-      <circle cx=${CX} cy=${CY} r=${layout.R} fill="none" stroke="#E3D9C3" strokeWidth="1.2" strokeDasharray="1.5 7.5" strokeLinecap="round"/>
+    <div className="px-4 sm:px-5 pt-3">
+      <div className="font-display text-[36px] sm:text-[42px] font-semibold numtab leading-none tracking-tight">${fmt(Math.round(totalAnim))}</div>
+      <div className="text-[12.5px] text-muted mt-2 numtab">
+        ${data.n === 0 ? 'add your first expense to see it here' : `${data.n} expense${data.n === 1 ? '' : 's'} on this trip`}
+      </div>
+    </div>
 
-      ${eNodes.map(e => {
-        const a = layout.pos[e.from], b = layout.pos[e.to];
-        const g = edgeGeom(a, b, CX, CY);
-        const w = 2.2 + 4.8 * Math.sqrt(e.amount / maxAmt);
-        const hot = focusE === e.key;
-        const col = hot ? '#8C3B20' : '#AE4E2E';
-        const label = fmt(e.amount);
-        const lw = label.length * 6.8 + 16;
-        const nearC = Math.hypot(g.mid.x - CX, g.mid.y - CY) < 52;
-        const L = nearC ? (qdist(g, .3, CX, CY) > qdist(g, .7, CX, CY) ? qpt(g, .3) : qpt(g, .7)) : g.mid;
-        const lx = L.x + g.px * 15, ly = L.y + g.py * 15;
-        return html`<g key=${mode + e.key} className="cursor-pointer"
-          style=${{ opacity: edgeDim(e), transition:'opacity .25s ease' }}
-          onClick=${ev => { ev.stopPropagation(); onEdgeClick(e); }}
-          onMouseEnter=${() => setHover({ t:'e', id: e.key })}
-          onMouseLeave=${() => setHover(null)}>
-          <path d=${g.d} stroke="#E7DEC9" strokeWidth="1.4" fill="none"/>
-          <path d=${g.d} stroke=${col} fill="none" strokeLinecap="round" className="edge-main"
-            style=${{ strokeWidth: hot ? w + 1.5 : w, transition:'stroke-width .2s ease' }}/>
-          <path d=${g.d} stroke="#F8EEE3" fill="none" strokeLinecap="round" strokeDasharray="2.5 9.5" className="edge-flow"
-            style=${{ strokeWidth: Math.max(1.3, w * .3) }}/>
-          <polygon points=${arrowPts(g)} fill=${col}/>
-          <g style=${{ transform:`translate(${lx}px,${ly}px)`, transition:'transform .6s cubic-bezier(.22,.9,.3,1)' }}>
-            <rect x=${-lw / 2} y=${-11.5} width=${lw} height=${23} rx=${11.5} fill="#26221B" stroke="#FCF9F3" strokeWidth="3"/>
-            <text textAnchor="middle" dominantBaseline="central" fontSize="12.5" fontWeight="600" fill="#F6F1E8" className="numtab">${label}</text>
-          </g>
-          <path d=${g.d} stroke="#FFFFFF" strokeOpacity="0" strokeWidth="26" fill="none"/>
-        </g>`;
-      })}
-
-      ${members.map(m => {
-        const p = layout.pos[m.id]; if (!p) return null;
-        const nv = net[m.id] || 0;
-        const pos_ = nv > 0.005, neg = nv < -0.005;
-        const netTxt = pos_ ? ('+' + fmt(nv)) : neg ? ('−' + fmt(-nv)) : 'settled';
-        const netCol = pos_ ? '#35603D' : neg ? '#8C3B20' : '#8B8271';
-        const sel = selected === m.id;
-        return html`<g key=${m.id} className="cursor-pointer"
-          style=${{ transform:`translate(${p.x}px,${p.y}px)`, transition:'transform .7s cubic-bezier(.22,.9,.3,1), opacity .25s ease', opacity: nodeDim(m.id) }}
-          onClick=${() => onNodeClick(m.id)}
-          onMouseEnter=${() => setHover({ t:'n', id: m.id })}
-          onMouseLeave=${() => setHover(null)}>
-          <g className="node-pop" style=${{ transformBox:'fill-box', transformOrigin:'center' }}>
-            ${sel && html`<circle r="33.5" fill="none" stroke="#26221B" strokeWidth="1.5" strokeDasharray="3 4.5" strokeLinecap="round"/>`}
-            <circle r="27" fill=${m.color} stroke="#FCF9F3" strokeWidth="4"/>
-            <text textAnchor="middle" dominantBaseline="central" fontSize="17" fontWeight="600" fill="#FCF9F3">${(m.name || '?').trim()[0].toUpperCase()}</text>
-            <text y="46" textAnchor="middle" fontSize=${m.name.length > 9 ? 12 : 13.5} fontWeight="600" fill="#26221B">${m.name}</text>
-            <text y="63" textAnchor="middle" fontSize="12" fontWeight="700" fill=${netCol} className="numtab">${netTxt}</text>
-          </g>
-        </g>`;
-      })}
-
-      <g style=${{ pointerEvents:'none' }}>
-        <text x=${CX} y=${CY - 8} textAnchor="middle" fontSize="33" fontWeight="600" fill="#26221B" className="font-display numtab">${fmt(Math.round(totalAnim))}</text>
-        <text x=${CX} y=${CY + 15} textAnchor="middle" fontSize="10" fontWeight="700" letterSpacing="2.2" fill="#8A8171" style=${{ textTransform:'uppercase' }}>Total spent</text>
-        <text x=${CX} y=${CY + 35} textAnchor="middle" fontSize="12" fill="#8A8171">
-          ${expenseCount} expense${expenseCount === 1 ? '' : 's'}${settledAll ? '' : ' · ' + eNodes.length + ' open debt' + (eNodes.length === 1 ? '' : 's')}
-        </text>
-        ${settledAll && html`<g transform=${`translate(${CX} ${CY + 62})`}>
-          <rect x="-78" y="-14" width="156" height="28" rx="14" fill="#E3EEE0" stroke="#FCF9F3" strokeWidth="3"/>
-          <text textAnchor="middle" dominantBaseline="central" fontSize="12" fontWeight="700" fill="#35603D">All settled up</text>
-        </g>`}
-      </g>
-    </svg>
+    ${data.n === 0
+      ? html`<div className="h-[148px] mx-1 flex flex-col items-center justify-center gap-1.5 text-center">
+          <span className="w-9 h-9 rounded-full bg-paper border border-line flex items-center justify-center text-muted"><${Icon} name="wallet" size=${16}/></span>
+          <span className="text-[13px] font-semibold text-muted">Nothing spent yet</span>
+          <span className="text-[12px] text-muted/75">Log an expense to see the bars light up.</span>
+        </div>`
+      : view === 'graph'
+        ? html`<div className="px-2 sm:px-3 pt-4">
+            <div className="relative flex items-end" style=${{ height: H }}>
+              ${list.map((d, i) => {
+                const hPct = d.total > 0 ? Math.max(7, d.total / max * 100) : 0;
+                const active = hot === i;
+                return html`<div key=${i}
+                  className=${'relative flex-1 h-full flex items-end justify-center ' + (d.total > 0 ? 'cursor-pointer' : 'cursor-default')}
+                  onMouseEnter=${() => { if (d.total > 0) setHot(i); }}
+                  onMouseLeave=${() => { if (active) setHot(null); }}
+                  onClick=${() => { if (d.total > 0) setHot(active ? null : i); }}>
+                  ${d.total > 0
+                    ? html`<div key=${'b' + i} className="bar-up overflow-hidden rounded-full flex flex-col-reverse"
+                        style=${{ height: hPct + '%', width: 'min(58%, 24px)', animationDelay: (i * 26) + 'ms' }}>
+                        ${Object.entries(d.byCat).map(([c, v]) => html`<div key=${c}
+                          style=${{ flexGrow: v, flexBasis: 0, minHeight: 3, background: CAT_BAR[c] || CAT_BAR.misc }}/>`)}
+                      </div>`
+                    : html`<div className="rounded-full" style=${{ height: 5, width: 'min(58%, 24px)', background: '#ECE2CE' }}/>`}
+                  ${active && d.total > 0 && html`<div
+                    className=${'absolute z-10 pointer-events-none backdrop-in ' +
+                      (i < list.length * 0.18 ? 'left-0' : i > list.length * 0.82 ? 'right-0' : 'left-1/2 -translate-x-1/2')}
+                    style=${{ bottom: `calc(${Math.min(hPct, 92)}% + 12px)` }}>
+                    <div className="bg-ink text-paper rounded-2xl shadow-pop px-3 py-2.5 w-max max-w-[190px]">
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-[10.5px] font-bold tracking-[.12em] uppercase text-paper/55">${tipLabel(d)}</span>
+                        <span className="text-[13px] font-semibold numtab">${fmt(d.total)}</span>
+                      </div>
+                      <div className="mt-1.5 space-y-1 min-w-[122px]">
+                        ${Object.entries(d.byCat).sort((a, b) => b[1] - a[1]).map(([c, v]) => html`<div key=${c} className="flex items-center gap-1.5 text-[11.5px]">
+                          <span className="w-2 h-2 rounded-full shrink-0" style=${{ background: CAT_BAR[c] || CAT_BAR.misc }}/>
+                          <span className="text-paper/75 truncate">${(CATS[c] || CATS.misc).label}</span>
+                          <span className="ml-auto pl-3 font-semibold numtab">${fmt(v)}</span>
+                        </div>`)}
+                      </div>
+                    </div>
+                  </div>`}
+                </div>`;
+              })}
+            </div>
+            <div className="mt-2 border-t border-line pt-1.5 flex items-center justify-between text-[10.5px] font-semibold text-muted numtab">
+              ${axis.map((ts, i) => html`<span key=${i}>${isToday(ts) && i === 2 ? 'Today' : fmtDay(ts)}</span>`)}
+            </div>
+          </div>`
+        : html`<div className="flex flex-col items-center pt-3">
+            <div className="relative donut-in">
+              <svg viewBox="0 0 220 128" width="220" height="128" role="img" aria-label="Spend by category">
+                <g transform="translate(110,58) scale(1,0.58)">
+                  <g transform="rotate(-90)">
+                    ${cats.map(s => {
+                      const len = s.value / data.total * 100;
+                      return html`<circle key=${'b' + s.cat} r="54" pathLength="100" fill="none"
+                        stroke=${shade(CAT_BAR[s.cat] || CAT_BAR.misc, -0.3)} strokeWidth="30"
+                        strokeDasharray=${(len - 0.8) + ' ' + (100 - len + 0.8)} strokeDashoffset=${-cats.slice(0, cats.indexOf(s)).reduce((a, x) => a + x.value / data.total * 100, 0)}
+                        style=${{ opacity: hoverCat && hoverCat !== s.cat ? 0.35 : 1, transition: 'opacity .2s ease' }}/>`;
+                    })}
+                  </g>
+                  <g transform="translate(0,-16) rotate(-90)">
+                    ${cats.map(s => {
+                      const len = s.value / data.total * 100;
+                      return html`<circle key=${'t' + s.cat} r="54" pathLength="100" fill="none"
+                        stroke=${CAT_BAR[s.cat] || CAT_BAR.misc} strokeWidth="30"
+                        strokeDasharray=${(len - 0.8) + ' ' + (100 - len + 0.8)} strokeDashoffset=${-cats.slice(0, cats.indexOf(s)).reduce((a, x) => a + x.value / data.total * 100, 0)}
+                        style=${{ opacity: hoverCat && hoverCat !== s.cat ? 0.45 : 1, transition: 'opacity .2s ease' }}/>`;
+                    })}
+                  </g>
+                </g>
+              </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none" style=${{ paddingBottom: 12 }}>
+                <span className="text-[7.5px] font-bold tracking-[.2em] uppercase text-muted">Total</span>
+                <span className="font-display text-[12.5px] font-semibold numtab leading-tight">${fmt(Math.round(data.total))}</span>
+              </div>
+            </div>
+            <div className="w-full max-w-[300px] mt-2 space-y-0.5 px-2">
+              ${cats.sort((a, b) => b.value - a.value).map((s, i) => html`<div key=${s.cat}
+                className="rise flex items-center gap-2.5 rounded-xl px-2 py-1.5 cursor-default transition hover:bg-paper/70"
+                style=${{ animationDelay: (i * 55) + 'ms' }}
+                onMouseEnter=${() => setHoverCat(s.cat)} onMouseLeave=${() => setHoverCat(null)}>
+                <span className="w-2.5 h-2.5 rounded-full shrink-0" style=${{ background: CAT_BAR[s.cat] || CAT_BAR.misc }}/>
+                <span className="text-[13px] font-semibold">${(CATS[s.cat] || CATS.misc).label}</span>
+                <span className="ml-auto text-[12px] text-muted numtab">${Math.round(s.value / data.total * 100)}%</span>
+                <span className="text-[13px] font-semibold numtab w-[76px] text-right">${fmt(s.value)}</span>
+              </div>`)}
+            </div>
+          </div>`}
   </div>`;
 }
+
+/* ---------------- who owes whom (simple list) ---------------- */
+
+function DebtRows({ items, verb, byId, onSettle, onSelect }) {
+  if (items.length === 0) {
+    return html`<div className="mx-4 sm:mx-5 mb-4 flex items-center gap-3 bg-sage-tint border border-sage/25 rounded-2xl px-4 py-3.5">
+      <span className="w-8 h-8 rounded-full bg-sage flex items-center justify-center shrink-0"><${Icon} name="check" size=${16} sw=${3} className="text-paper"/></span>
+      <div>
+        <div className="text-[14px] font-semibold text-sage-deep">Everyone's settled up</div>
+        <div className="text-[12.5px] text-sage-deep/80">No pending payments in this group.</div>
+      </div>
+    </div>`;
+  }
+  return html`<div className="px-2.5 sm:px-3 pb-3.5 pt-1 space-y-0.5">
+    ${items.map((s, i) => html`<div key=${s.from + '>' + s.to}
+      className="rise flex items-center gap-2.5 sm:gap-3 rounded-2xl px-2 sm:px-2.5 py-2.5 hover:bg-paper/70 transition"
+      style=${{ animationDelay: (i * 55) + 'ms' }}>
+      <div className="flex items-center shrink-0">
+        <button onClick=${() => onSelect(s.from)} aria-label=${'View ' + firstName((byId[s.from] || {}).name || '')} className="rounded-full transition-transform hover:scale-110 active:scale-95"><${Avatar} m=${byId[s.from]} size=${32}/></button>
+        <span className="mx-0.5 text-muted shrink-0"><${Icon} name="arrR" size=${14} sw=${2.2}/></span>
+        <button onClick=${() => onSelect(s.to)} aria-label=${'View ' + firstName((byId[s.to] || {}).name || '')} className="rounded-full transition-transform hover:scale-110 active:scale-95"><${Avatar} m=${byId[s.to]} size=${32}/></button>
+      </div>
+      <div className="flex-1 min-w-0 text-[13.5px] sm:text-[14px] leading-tight">
+        <button onClick=${() => onSelect(s.from)} className="font-semibold hover:underline underline-offset-2 decoration-2 decoration-line">${firstName((byId[s.from] || {}).name || '?')}</button>
+        <span className="text-muted"> ${verb} </span>
+        <button onClick=${() => onSelect(s.to)} className="font-semibold hover:underline underline-offset-2 decoration-2 decoration-line">${firstName((byId[s.to] || {}).name || '?')}</button>
+      </div>
+      <span className="numtab text-[14px] font-semibold shrink-0">${fmt(s.amount)}</span>
+      <button onClick=${() => onSettle(s)} className="shrink-0 rounded-full bg-ink text-paper text-[12px] font-semibold px-3 py-1.5 hover:bg-ink/85 active:scale-95 transition">Settle</button>
+    </div>`)}
+  </div>`;
+}
+
 
 /* ---------------- balance tab pieces ---------------- */
 
@@ -705,25 +944,37 @@ function SettleHistory({ group, byId }) {
   </div>`;
 }
 
-function BalanceTab({ group, edges, net, simplified, total, selected, setSelected, openSettle }) {
+function BalanceTab({ group, edges, net, simplified, total, selected, setSelected, openSettle, onMakeOwn }) {
   const [mode, setMode] = useState('direct');
   const byId = useMemo(() => Object.fromEntries(group.members.map(m => [m.id, m])), [group.members]);
   return html`<div className="max-w-3xl mx-auto px-4 sm:px-6 pt-5 pb-10">
+    <button onClick=${onMakeOwn} className="group w-full mb-4 flex items-center gap-3.5 rounded-3xl bg-ink text-paper px-4 sm:px-5 py-4 text-left shadow-pop transition hover:bg-[#1d1913] active:scale-[.99]">
+      <span className="w-10 h-10 rounded-2xl bg-[#3DDC5C]/15 border border-[#3DDC5C]/30 text-[#3DDC5C] flex items-center justify-center shrink-0 transition-transform duration-300 group-hover:rotate-12">
+        <${Icon} name="sparkle" size=${18}/>
+      </span>
+      <span className="flex-1 min-w-0">
+        <span className="block font-display font-bold tracking-[.15em] text-[13.5px] uppercase leading-tight">Make my own trip<span className="text-[#3DDC5C]">.</span></span>
+        <span className="block text-[12px] text-paper/55 mt-1 leading-snug">Start a fresh group — name your trip, add your crew & split every expense.</span>
+      </span>
+      <${Icon} name="arrR" size=${16} className="text-paper/45 shrink-0 transition-transform duration-200 group-hover:translate-x-0.5"/>
+    </button>
     <div id="tour-graph" className="bg-card border border-line rounded-3xl shadow-soft overflow-hidden">
+      <${SpendChart} group=${group}/>
+    </div>
+
+    <div className="mt-4 bg-card border border-line rounded-3xl shadow-soft overflow-hidden">
       <div className="flex items-center justify-between gap-3 px-4 sm:px-5 pt-4 pb-2">
         <div className="min-w-0">
-          <div className="text-[11px] font-bold tracking-[.16em] uppercase text-muted">Balance graph</div>
-          <div className="text-[12.5px] text-muted mt-0.5 truncate">${mode === 'direct' ? 'Arrows show real debts, person to person' : 'Minimum payments to clear everything'}</div>
+          <div className="text-[11px] font-bold tracking-[.16em] uppercase text-muted">Who owes whom</div>
+          <div className="text-[12.5px] text-muted mt-0.5 truncate">${mode === 'direct' ? 'Every live debt, person to person' : 'The fewest payments to clear it all'}</div>
         </div>
         <div id="tour-toggle" className="flex bg-paper border border-line rounded-full p-0.5 text-[12px] font-semibold shrink-0">
           ${[['direct','Direct'],['simple','Simplified']].map(([k, l]) => html`<button key=${k} onClick=${() => setMode(k)}
             className=${'px-3 py-1.5 rounded-full transition ' + (mode === k ? 'bg-ink text-paper' : 'text-muted hover:text-ink')}>${l}</button>`)}
         </div>
       </div>
-      <${BalanceGraph} members=${group.members} edges=${edges} simplified=${simplified} net=${net}
-        total=${total} expenseCount=${group.expenses.length} mode=${mode} selected=${selected}
-        onNodeClick=${id => setSelected(selected === id ? null : id)}
-        onEdgeClick=${e => openSettle({ from: e.from, to: e.to, amount: e.amount })}/>
+      <${DebtRows} items=${mode === 'direct' ? edges : simplified} verb=${mode === 'direct' ? 'owes' : 'pays'}
+        byId=${byId} onSettle=${openSettle} onSelect=${id => setSelected(selected === id ? null : id)}/>
     </div>
 
     ${selected && html`<${MemberPanel} key=${selected} group=${group} memberId=${selected} edges=${edges} net=${net}
@@ -977,13 +1228,8 @@ function AddExpenseSheet({ group, onClose, onSave, initial }) {
 
       <div>
         <label className="lbl">Paid by</label>
-        <div className="flex flex-wrap gap-2">
-          ${members.map(m => html`<button key=${m.id} onClick=${() => setPayer(m.id)}
-            className=${'flex items-center gap-2 rounded-full border pl-1 pr-3 py-1 transition ' + (payer === m.id ? 'border-ink bg-paper' : 'border-line hover:border-muted')}>
-            <${Avatar} m=${m} size=${26}/>
-            <span className="text-[13px] font-semibold">${firstName(m.name)}</span>
-          </button>`)}
-        </div>
+        <${PeoplePill} members=${members} selected=${[payer]} single emptyLabel="Who paid?"
+          onToggle=${id => setPayer(id)}/>
       </div>
 
       <div>
@@ -995,17 +1241,11 @@ function AddExpenseSheet({ group, onClose, onSave, initial }) {
           </div>
         </div>
 
-        ${mode === 'equal' && html`<div className="space-y-1.5">
-          ${members.map(m => html`<button key=${m.id} onClick=${() => setIncl(o => ({ ...o, [m.id]: !o[m.id] }))}
-            className=${'w-full flex items-center gap-2.5 rounded-2xl border px-3 py-2 transition ' + (incl[m.id] ? 'border-line bg-paper' : 'border-line/60 opacity-50')}>
-            <span className=${'w-5 h-5 rounded-md border flex items-center justify-center shrink-0 transition ' + (incl[m.id] ? 'bg-ink border-ink text-paper' : 'border-muted/50')}>
-              ${incl[m.id] && html`<${Icon} name="check" size=${12} sw=${3}/>`}
-            </span>
-            <${Avatar} m=${m} size=${28}/>
-            <span className="text-[13.5px] font-semibold flex-1 text-left">${m.name}</span>
-            <span className="numtab text-[13.5px] font-semibold">${fmt(eqShares[m.id] || 0)}</span>
-          </button>`)}
-          <p className="text-[12px] text-muted pt-1">Each selected person pays <span className="font-semibold text-ink">${fmt(each)}</span>.</p>
+        ${mode === 'equal' && html`<div className="space-y-2.5">
+          <${PeoplePill} members=${members} selected=${inclIds} emptyLabel="Nobody yet"
+            onToggle=${id => setIncl(o => ({ ...o, [id]: !o[id] }))}
+            sub=${m => incl[m.id] ? fmt(eqShares[m.id] || 0) : 'not included'}/>
+          <p className="text-[12px] text-muted pt-0.5">Each selected person pays <span className="font-semibold text-ink">${fmt(each)}</span>.</p>
         </div>`}
 
         ${mode === 'custom' && html`<div className="space-y-3">
@@ -1113,9 +1353,9 @@ function SettleSheet({ group, preset, onClose, onSave }) {
   <//>`;
 }
 
-function GroupSheet({ group, onClose, onSaveGroup, onReset, onReplayTour, isDemo }) {
-  const [name, setName] = useState(group.name);
-  const [members, setMembers] = useState(group.members);
+function GroupSheet({ group, onClose, onSaveGroup, onReset, onReplayTour, isDemo, isCreate, onSheet }) {
+  const [name, setName] = useState(isCreate ? 'My trip' : group.name);
+  const [members, setMembers] = useState(isCreate ? [{ id: uid(), name: 'You', color: AV[0] }] : group.members);
   const [newName, setNewName] = useState('');
 
   const addMember = () => {
@@ -1124,14 +1364,15 @@ function GroupSheet({ group, onClose, onSaveGroup, onReset, onReplayTour, isDemo
     setNewName('');
   };
   const removeMember = id => { if (members.length > 2) setMembers(ms => ms.filter(m => m.id !== id)); };
-  const save = () => onSaveGroup({ name: name.trim() || group.name, members });
+  const save = () => onSaveGroup({ name: name.trim() || (isCreate ? 'My trip' : group.name), members });
 
-  return html`<${Sheet} title="Group settings" onClose=${onClose}
+  return html`<${Sheet} title=${isCreate ? 'Make your own trip' : 'Group settings'} onClose=${onClose}
     footer=${html`<div className="shrink-0 border-t border-line px-5 py-3.5 flex gap-2 bg-card">
       <button onClick=${onClose} className="flex-1 rounded-full border border-line px-4 py-2.5 text-[13.5px] font-semibold hover:border-muted transition">Cancel</button>
-      <button onClick=${save} className="flex-1 rounded-full bg-ink text-paper px-4 py-2.5 text-[13.5px] font-semibold hover:bg-ink/90 active:scale-95 transition">Save changes</button>
+      <button onClick=${save} className="flex-1 rounded-full bg-ink text-paper px-4 py-2.5 text-[13.5px] font-semibold hover:bg-ink/90 active:scale-95 transition">${isCreate ? 'Create trip' : 'Save changes'}</button>
     </div>`}>
     <div className="space-y-5">
+      ${isCreate && html`<p className="text-[12px] text-muted leading-relaxed bg-paper border border-line rounded-xl px-3.5 py-2.5">Your current group and expenses stay untouched until you tap <span className="font-semibold text-ink">Create trip</span>.</p>`}
       <div>
         <label className="lbl">Group name</label>
         <input className="inp" value=${name} maxLength=${40} onChange=${e => setName(e.target.value)}/>
@@ -1160,6 +1401,12 @@ function GroupSheet({ group, onClose, onSaveGroup, onReset, onReplayTour, isDemo
         </div>
       </div>
 
+      ${!isCreate && html`
+      <button onClick=${onSheet} className="w-full flex items-center gap-2.5 rounded-2xl border border-line px-4 py-3 hover:border-muted transition">
+        <${Icon} name="sheet" size=${16} className="text-muted"/>
+        <span className="text-[13.5px] font-semibold flex-1 text-left">Download trip sheet · Excel</span>
+        <${Icon} name="right" size=${14} className="text-muted"/>
+      </button>
       <button onClick=${onReplayTour} className="w-full flex items-center gap-2.5 rounded-2xl border border-line px-4 py-3 hover:border-muted transition">
         <${Icon} name="replay" size=${16} className="text-muted"/>
         <span className="text-[13.5px] font-semibold flex-1 text-left">Replay the guided tour</span>
@@ -1180,16 +1427,20 @@ function GroupSheet({ group, onClose, onSaveGroup, onReset, onReplayTour, isDemo
           </button>
         </div>
       </div>
+      `}
     </div>
   <//>`;
 }
 
 /* ---------------- chrome: header & bottom nav ---------------- */
 
-function Header({ group, total, demo, onSettings }) {
+function Header({ group, total, demo, onSettings, onSheet }) {
   return html`<header className="sticky top-0 z-40 bg-paper/85 backdrop-blur-md border-b border-line">
     <div className="max-w-3xl mx-auto px-4 sm:px-6 h-[60px] flex items-center gap-3">
-      <span className="w-9 h-9 rounded-2xl bg-ink text-paper flex items-center justify-center font-display font-bold text-[16px] shrink-0 shadow-soft">H</span>
+      <span className="inline-flex items-baseline rounded-lg bg-ink pl-2.5 pr-2 py-[7px] shrink-0 shadow-soft" aria-label="Splid logo">
+        <span className="font-display font-bold tracking-[.14em] text-[12.5px] leading-none text-paper uppercase">SPLID</span>
+        <span className="ml-[2.5px] font-display font-bold text-[15px] leading-none text-[#3DDC5C]">.</span>
+      </span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <h1 className="font-display text-[17px] font-semibold truncate leading-tight">${group.name}</h1>
@@ -1197,7 +1448,15 @@ function Header({ group, total, demo, onSettings }) {
         </div>
         <div className="text-[11.5px] text-muted truncate numtab">${group.members.length} member${group.members.length === 1 ? '' : 's'} · ${fmt(total)} spent</div>
       </div>
-      <${AvStack} members=${group.members} size=${24} max=${4}/>
+      <span className="hidden sm:block shrink-0"><${AvStack} members=${group.members} size=${24} max=${4}/></span>
+      <button onClick=${onSheet} title="Download this trip as an Excel sheet" aria-label="Download trip sheet"
+        className="hidden sm:inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-ink text-paper text-[10px] font-bold tracking-[.16em] shadow-soft hover:bg-ink/90 active:scale-95 transition shrink-0">
+        <${Icon} name="sheet" size=${12} sw=${2.4}/><span>SHEET</span>
+      </button>
+      <button onClick=${onSheet} title="Download this trip as an Excel sheet" aria-label="Download trip sheet"
+        className="sm:hidden w-8 h-8 shrink-0 rounded-full bg-ink text-paper flex items-center justify-center shadow-soft active:scale-95 transition">
+        <${Icon} name="sheet" size=${14} sw=${2.2}/>
+      </button>
       <button onClick=${onSettings} aria-label="Group settings" className="p-2 rounded-full text-muted hover:bg-card hover:text-ink transition">
         <${Icon} name="slider" size=${18}/>
       </button>
@@ -1277,17 +1536,27 @@ function App() {
     showToast('Settlement removed', 'trash');
   };
   const saveGroup = ({ name, members }) => {
-    patchGroup(g => ({ ...g, name, members }));
+    const creating = sheet && sheet.type === 'group' && sheet.create;
     setSheet(null); setSelected(null);
-    showToast('Group updated');
+    if (creating) {
+      setDb(d => ({ ...d, demo: false, tourDone: true, groups: [{
+        id: uid(), name: name || 'My trip', color: '#4283F2',
+        members, expenses: [], settlements: [],
+      }] }));
+      showToast('Trip created — log your first expense!', 'sparkle');
+      setSheet({ type: 'add' });
+    } else {
+      patchGroup(g => ({ ...g, name, members }));
+      showToast('Group updated');
+    }
   };
   const resetAll = kind => {
     if (kind === 'demo') {
       setDb(freshDemoDb());
       showToast('Demo restored', 'replay');
     } else {
-      setDb({ v: 2, demo: false, tourDone: true, groups: [{
-        id: uid(), name: 'My group', color: '#48764F',
+      setDb({ v: 3, demo: false, tourDone: true, groups: [{
+        id: uid(), name: 'My group', color: '#4283F2',
         members: [{ id: uid(), name: 'You', color: AV[0] }],
         expenses: [], settlements: [],
       }] });
@@ -1296,22 +1565,28 @@ function App() {
     setSheet(null); setSelected(null); setTab('balance');
   };
 
+  const makeOwnTrip = () => {
+    setSelected(null); setTab('balance');
+    setSheet({ type: 'group', create: true });
+  };
+
   const finishTour = () => {
     setTourOpen(false);
     setDb(d => d.tourDone ? d : { ...d, tourDone: true });
   };
-  const finalTour = () => { finishTour(); setSheet({ type:'group' }); };
+  const finalTour = () => { finishTour(); makeOwnTrip(); };
 
   const openSettle = preset => setSheet({ type:'settle', preset });
   const openAdd = initial => setSheet(initial ? { type:'add', initial } : { type:'add' });
 
   return html`<div className="min-h-screen bg-paper text-ink font-sans antialiased flex flex-col">
-    <${Header} group=${group} total=${total} demo=${db.demo} onSettings=${() => setSheet({ type:'group' })}/>
+    <${Header} group=${group} total=${total} demo=${db.demo} onSettings=${() => setSheet({ type:'group' })}
+      onSheet=${() => downloadTripSheet(group, m => showToast(m, 'check'))}/>
 
     <main className="flex-1">
       ${tab === 'balance'
         ? html`<${BalanceTab} group=${group} edges=${edges} net=${net} simplified=${simplified} total=${total}
-            selected=${selected} setSelected=${setSelected} openSettle=${openSettle}/>`
+            selected=${selected} setSelected=${setSelected} openSettle=${openSettle} onMakeOwn=${makeOwnTrip}/>`
         : html`<${ActivityTab} group=${group} byId=${byId}
             onDelete=${deleteExpense} onEdit=${openAdd} onDeleteSettlement=${deleteSettlement}/>`}
     </main>
@@ -1324,8 +1599,9 @@ function App() {
       group=${group} initial=${sheet.initial} onClose=${() => setSheet(null)} onSave=${saveExpense}/>`}
     ${sheet && sheet.type === 'settle' && html`<${SettleSheet} key=${sheet.preset ? (sheet.preset.from + '>' + sheet.preset.to + sheet.preset.amount) : 'free'}
       group=${group} preset=${sheet.preset} onClose=${() => setSheet(null)} onSave=${saveSettlement}/>`}
-    ${sheet && sheet.type === 'group' && html`<${GroupSheet} group=${group} isDemo=${db.demo}
+    ${sheet && sheet.type === 'group' && html`<${GroupSheet} group=${group} isDemo=${db.demo} isCreate=${sheet.create}
       onClose=${() => setSheet(null)} onSaveGroup=${saveGroup} onReset=${resetAll}
+      onSheet=${() => downloadTripSheet(group, m => showToast(m, 'check'))}
       onReplayTour=${() => { setSheet(null); setTourOpen(true); }}/>`}
 
     <${ToastView} toast=${toast}/>
