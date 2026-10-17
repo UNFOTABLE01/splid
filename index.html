@@ -41,6 +41,8 @@ tailwind.config = {
     background-image:radial-gradient(rgba(38,34,27,.12) 1.2px,transparent 1.2px);
     background-size:22px 22px;
   }
+  @keyframes livePulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.8)}}
+  .live-dot{animation:livePulse 1.6s ease-in-out infinite}
   .numtab{font-variant-numeric:tabular-nums lining-nums}
   .font-display{font-optical-sizing:auto}
   .lbl{display:block;font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#7D7463;margin-bottom:8px}
@@ -85,6 +87,7 @@ tailwind.config = {
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/htm@3.1.1/dist/htm.umd.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://unpkg.com/mqtt@5/dist/mqtt.min.js"></script>
 </head>
 
 <body class="bg-paper text-ink font-sans antialiased">
@@ -363,6 +366,37 @@ function downloadTripSheet(group, notify) {
   }
 }
 
+/* ---------------- live sync (share codes · mqtt retained) ---------------- */
+
+const MQTT_URL = 'wss://broker.emqx.io:8084/mqtt';
+const TOPIC_ROOT = 'splid/v1/';
+const CODE_ABC = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+const chunkCode = c => String(c || '').replace(/(.{4})(?=.)/g, '$1-');
+const newShareCode = () => Array.from({ length: 8 }, () => CODE_ABC[Math.floor(Math.random() * CODE_ABC.length)]).join('');
+const cleanCode = c => String(c || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+const hashStr = s => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return h; };
+
+/* one-shot connection to fetch the retained trip state for a code */
+function fetchRetainedGroup(topic) {
+  return new Promise((resolve, reject) => {
+    let c;
+    try { c = mqtt.connect(MQTT_URL, { clientId: 'splid-' + uid(), keepalive: 20, reconnectPeriod: 0, connectTimeout: 7000 }); }
+    catch (e) { return reject(e); }
+    let done = false;
+    const finish = (fn, arg) => { if (done) return; done = true; clearTimeout(to); try { c.end(true); } catch (e) {} fn(arg); };
+    const to = setTimeout(() => finish(reject, new Error('not-found')), 9000);
+    c.on('connect', () => { c.subscribe(topic, { qos: 0 }); });
+    c.on('message', (t, payload) => {
+      try {
+        const d = JSON.parse(payload.toString());
+        if (d && d.app === 'splid' && !d.ended && d.group && Array.isArray(d.group.members)) finish(resolve, d.group);
+        else finish(reject, new Error('bad-data'));
+      } catch (e) { finish(reject, e); }
+    });
+    c.on('error', e => finish(reject, e));
+  });
+}
+
 /* ---------------- seed demo data ---------------- */
 
 function seedGroup() {
@@ -382,7 +416,7 @@ function seedGroup() {
     settlements: [],
   };
 }
-const freshDemoDb = () => ({ v: 3, demo: true, tourDone: false, groups: [seedGroup()] });
+const freshDemoDb = () => ({ v: 3, demo: true, tourDone: false, deviceId: uid(), groups: [seedGroup()] });
 
 /* ---------------- tiny hooks ---------------- */
 
@@ -949,7 +983,7 @@ function SettleHistory({ group, byId }) {
   </div>`;
 }
 
-function BalanceTab({ group, edges, net, simplified, total, selected, setSelected, openSettle, onMakeOwn }) {
+function BalanceTab({ group, edges, net, simplified, total, selected, setSelected, openSettle, onMakeOwn, onJoin }) {
   const [mode, setMode] = useState('direct');
   const byId = useMemo(() => Object.fromEntries(group.members.map(m => [m.id, m])), [group.members]);
   return html`<div className="max-w-3xl mx-auto px-4 sm:px-6 pt-5 pb-10">
@@ -962,6 +996,16 @@ function BalanceTab({ group, edges, net, simplified, total, selected, setSelecte
         <span className="block text-[12px] text-paper/55 mt-1 leading-snug">Start a fresh group — name your trip, add your crew & split every expense.</span>
       </span>
       <${Icon} name="arrR" size=${16} className="text-paper/45 shrink-0 transition-transform duration-200 group-hover:translate-x-0.5"/>
+    </button>
+    <button onClick=${onJoin} className="group w-full mb-4 flex items-center gap-3.5 rounded-3xl border border-line bg-card/80 px-4 sm:px-5 py-3.5 text-left transition hover:border-muted active:scale-[.99]">
+      <span className="w-10 h-10 rounded-2xl bg-sage-tint border border-sage/30 text-sage-deep flex items-center justify-center shrink-0">
+        <${Icon} name="users" size=${17}/>
+      </span>
+      <span className="flex-1 min-w-0">
+        <span className="block font-display font-bold tracking-[.15em] text-[13px] uppercase leading-tight">Have a code? Join a shared trip<span className="text-sage">.</span></span>
+        <span className="block text-[12px] text-muted mt-1 leading-snug">Paste a trip code from another device — expenses sync live, both ways.</span>
+      </span>
+      <${Icon} name="arrR" size=${16} className="text-muted/60 shrink-0 transition-transform duration-200 group-hover:translate-x-0.5"/>
     </button>
     <div id="tour-graph" className="bg-card border border-line rounded-3xl shadow-soft overflow-hidden">
       <${SpendChart} group=${group}/>
@@ -1358,10 +1402,31 @@ function SettleSheet({ group, preset, onClose, onSave }) {
   <//>`;
 }
 
-function GroupSheet({ group, onClose, onSaveGroup, onReset, onReplayTour, isDemo, isCreate, onSheet }) {
+function GroupSheet({ group, onClose, onSaveGroup, onReset, onReplayTour, isDemo, isCreate, onSheet, onShare, onStopShare, onJoinOpen, onRestore, backupName }) {
   const [name, setName] = useState(isCreate ? 'My trip' : group.name);
   const [members, setMembers] = useState(isCreate ? [{ id: uid(), name: 'You', color: AV[0] }] : group.members);
   const [newName, setNewName] = useState('');
+  const [sharing, setSharing] = useState(false);
+  const [shareErr, setShareErr] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const share = async () => {
+    setSharing(true); setShareErr(false);
+    try { await onShare(); } catch (e) { setShareErr(true); }
+    setSharing(false);
+  };
+  const copyCode = () => {
+    const c = group.shareCode && group.shareCode.code; if (!c) return;
+    const done = () => { setCopied(true); setTimeout(() => setCopied(false), 1600); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(c).then(done, done);
+    else {
+      const ta = document.createElement('textarea');
+      ta.value = c; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); } catch (e) {}
+      ta.remove(); done();
+    }
+  };
 
   const addMember = () => {
     const n = newName.trim(); if (!n) return;
@@ -1412,6 +1477,42 @@ function GroupSheet({ group, onClose, onSaveGroup, onReset, onReplayTour, isDemo
         <span className="text-[13.5px] font-semibold flex-1 text-left">Download trip sheet · Excel</span>
         <${Icon} name="right" size=${14} className="text-muted"/>
       </button>
+
+      <div>
+        <label className="lbl">Share & live sync</label>
+        ${!group.shareCode ? html`
+        <button onClick=${share} disabled=${sharing} className="w-full flex items-center gap-2.5 rounded-2xl border border-line px-4 py-3 hover:border-muted transition disabled:opacity-50">
+          <${Icon} name="arrLR" size=${16} className="text-muted"/>
+          <span className="text-[13.5px] font-semibold flex-1 text-left">${sharing ? 'Creating your code…' : 'Share this trip — get a code'}</span>
+          <${Icon} name="right" size=${14} className="text-muted"/>
+        </button>
+        ${shareErr && html`<p className="text-[12px] text-rust-deep mt-1.5">Couldn’t create the code — check your internet and try again.</p>`}
+        <p className="text-[11.5px] text-muted mt-2 leading-relaxed">Generates a code you can paste into Splid on any other device. That device joins this trip, and every expense or settlement syncs live, both ways.</p>
+        ` : html`
+        <div className="bg-paper border border-line rounded-2xl p-3.5">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-sage live-dot"></span>
+            <span className="text-[11px] font-bold tracking-[.14em] uppercase text-sage-deep">Live sync active</span>
+          </div>
+          <div className="mt-2.5 flex items-center gap-2">
+            <code className="font-mono text-[13px] font-bold tracking-[.06em] leading-snug break-all flex-1 numtab">${group.shareCode.code}</code>
+            <button onClick=${copyCode} className="shrink-0 rounded-full bg-ink text-paper text-[11.5px] font-bold px-3 py-1.5 hover:bg-ink/90 active:scale-95 transition w-[76px]">${copied ? 'Copied ✓' : 'Copy'}</button>
+          </div>
+          <p className="text-[11.5px] text-muted mt-2.5 leading-relaxed">Paste this code into Splid on another device to invite it here. Edits flow live, both ways.</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button onClick=${onJoinOpen} className="rounded-full border border-line text-[12px] font-semibold px-3.5 py-2 hover:border-muted transition">Join another trip</button>
+            <button onClick=${onStopShare} className="rounded-full border border-rust/40 text-rust-deep text-[12px] font-semibold px-3.5 py-2 hover:bg-rust-tint transition">Stop live sync</button>
+          </div>
+        </div>
+        `}
+      </div>
+
+      ${backupName && html`<button onClick=${onRestore} className="w-full flex items-center gap-2.5 rounded-2xl border border-line px-4 py-3 hover:border-muted transition">
+        <${Icon} name="replay" size=${16} className="text-muted"/>
+        <span className="text-[13.5px] font-semibold flex-1 text-left">Restore “${backupName}”</span>
+        <${Icon} name="right" size=${14} className="text-muted"/>
+      </button>`}
+
       <button onClick=${onReplayTour} className="w-full flex items-center gap-2.5 rounded-2xl border border-line px-4 py-3 hover:border-muted transition">
         <${Icon} name="replay" size=${16} className="text-muted"/>
         <span className="text-[13.5px] font-semibold flex-1 text-left">Replay the guided tour</span>
@@ -1437,9 +1538,39 @@ function GroupSheet({ group, onClose, onSaveGroup, onReset, onReplayTour, isDemo
   <//>`;
 }
 
+/* ---------------- join sheet ---------------- */
+
+function JoinSheet({ onClose, onJoin }) {
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const submit = async () => {
+    if (!code.trim() || busy) return;
+    setBusy(true); setErr(null);
+    try { await onJoin(code); }
+    catch (e) { setErr('No trip found for that code — double-check it and try again.'); setBusy(false); }
+  };
+  return html`<${Sheet} title="Join a shared trip" onClose=${onClose}
+    footer=${html`<div className="shrink-0 border-t border-line px-5 py-3.5 flex gap-2 bg-card">
+      <button onClick=${onClose} className="flex-1 rounded-full border border-line px-4 py-2.5 text-[13.5px] font-semibold hover:border-muted transition">Cancel</button>
+      <button onClick=${submit} disabled=${!code.trim() || busy} className="flex-1 rounded-full bg-ink text-paper px-4 py-2.5 text-[13.5px] font-semibold hover:bg-ink/90 active:scale-95 transition disabled:opacity-40">${busy ? 'Joining…' : 'Join trip'}</button>
+    </div>`}>
+    <div className="space-y-4">
+      <p className="text-[12.5px] text-muted leading-relaxed">Ask the trip owner for their share code, paste it below, and this device joins the same record — expenses and settlements flow live, both ways.</p>
+      <div>
+        <label className="lbl">Trip code</label>
+        <input className="inp font-mono tracking-[.18em] uppercase" placeholder="XXXX-XXXX" value=${code} maxLength=${16} spellCheck=${false}
+          onChange=${e => setCode(e.target.value.toUpperCase())}
+          onKeyDown=${e => { if (e.key === 'Enter') submit(); }}/>
+        ${err && html`<p className="text-[12px] text-rust-deep mt-1.5">${err}</p>`}
+      </div>
+    </div>
+  <//>`;
+}
+
 /* ---------------- chrome: header & bottom nav ---------------- */
 
-function Header({ group, total, demo, onSettings, onSheet }) {
+function Header({ group, total, demo, onSettings, onSheet, liveOn }) {
   return html`<header className="sticky top-0 z-40 bg-paper/85 backdrop-blur-md border-b border-line">
     <div className="max-w-3xl mx-auto px-4 sm:px-6 h-[60px] flex items-center gap-3">
       <span className="inline-flex items-baseline rounded-lg bg-ink pl-2.5 pr-2 py-[7px] shrink-0 shadow-soft" aria-label="Splid logo">
@@ -1450,6 +1581,7 @@ function Header({ group, total, demo, onSettings, onSheet }) {
         <div className="flex items-center gap-2">
           <h1 className="font-display text-[17px] font-semibold truncate leading-tight">${group.name}</h1>
           ${demo && html`<span className="text-[9.5px] font-bold tracking-[.14em] uppercase bg-rust-tint text-rust-deep rounded-full px-1.5 py-0.5 shrink-0">Demo</span>`}
+          ${group.shareCode && html`<span className=${'inline-flex items-center gap-1.5 text-[9.5px] font-bold tracking-[.14em] uppercase rounded-full px-1.5 py-0.5 shrink-0 ' + (liveOn ? 'bg-sage-tint text-sage-deep' : 'bg-card border border-line text-muted')}><span className=${'w-1.5 h-1.5 rounded-full ' + (liveOn ? 'bg-sage live-dot' : 'bg-muted')}></span>${liveOn ? 'Live' : 'Sync…'}</span>`}
         </div>
         <div className="text-[11.5px] text-muted truncate numtab">${group.members.length} member${group.members.length === 1 ? '' : 's'} · ${fmt(total)} spent</div>
       </div>
@@ -1493,7 +1625,7 @@ function App() {
   const [db, setDb] = useState(() => {
     try {
       const raw = localStorage.getItem(KEY);
-      if (raw) { const d = JSON.parse(raw); if (d && d.groups && d.groups.length) return d; }
+      if (raw) { const d = JSON.parse(raw); if (d && d.groups && d.groups.length) { if (!d.deviceId) d.deviceId = uid(); return d; } }
     } catch (e) {}
     return freshDemoDb();
   });
@@ -1519,28 +1651,84 @@ function App() {
   const simplified = useMemo(() => simplify(net), [net]);
   const total = useMemo(() => group.expenses.reduce((s, e) => s + (+e.amount || 0), 0), [group.expenses]);
 
+  /* live sync state */
+  const pendingPush = useRef(false);
+  const groupRef = useRef(group); groupRef.current = group;
+  const deviceRef = useRef(db.deviceId); deviceRef.current = db.deviceId;
+  const hashRef = useRef('');
+  const clientRef = useRef(null);
+  const subRef = useRef(null);
+  const [liveOn, setLiveOn] = useState(false);
+  useEffect(() => { hashRef.current = hashStr(JSON.stringify(group)); }, [group]);
+
+  const ensureLive = () => {
+    if (clientRef.current) return clientRef.current;
+    const c = mqtt.connect(MQTT_URL, { clientId: 'splid-' + uid(), keepalive: 30, reconnectPeriod: 3000, connectTimeout: 8000 });
+    c.on('connect', () => setLiveOn(true));
+    c.on('close', () => setLiveOn(false));
+    c.on('message', (t, payload) => {
+      let d;
+      try { d = JSON.parse(payload.toString()); } catch (e) { return; }
+      if (!d || d.app !== 'splid') return;
+      if (d.ended) {
+        const g = groupRef.current;
+        if (g.shareCode && g.shareCode.id === t) {
+          patchGroup(x => { const { shareCode, ...rest } = x; return rest; });
+          showToast('Owner stopped sharing this trip');
+        }
+        return;
+      }
+      if (t !== (groupRef.current.shareCode && groupRef.current.shareCode.id)) return;
+      if (d.updatedBy === deviceRef.current) return;
+      if (!d.group || !Array.isArray(d.group.members)) return;
+      if (hashStr(JSON.stringify(d.group)) === hashRef.current) return;
+      setDb(x => ({ ...x, groups: [d.group, ...x.groups.slice(1)] }));
+      showToast('Trip updated live', 'sparkle');
+    });
+    clientRef.current = c;
+    return c;
+  };
+  useEffect(() => () => { if (clientRef.current) { try { clientRef.current.end(true); } catch (e) {} } }, []);
+
+  /* subscribe to the current trip's topic */
+  useEffect(() => {
+    const sc = group.shareCode;
+    if (!sc) return;
+    const c = ensureLive();
+    if (subRef.current !== sc.id) {
+      if (subRef.current) { try { c.unsubscribe(subRef.current); } catch (e) {} }
+      try { c.subscribe(sc.id, { qos: 0 }); } catch (e) {}
+      subRef.current = sc.id;
+    }
+  }, [group.shareCode]);
+
   const patchGroup = fn => setDb(d => ({ ...d, groups: d.groups.map((g, i) => i === 0 ? fn(g) : g) }));
 
   const saveExpense = exp => {
+    pendingPush.current = true;
     const existed = group.expenses.some(e => e.id === exp.id);
     patchGroup(g => ({ ...g, expenses: existed ? g.expenses.map(e => e.id === exp.id ? exp : e) : [...g.expenses, exp] }));
     setSheet(null);
     showToast(existed ? 'Expense updated' : 'Expense added');
   };
   const deleteExpense = id => {
+    pendingPush.current = true;
     patchGroup(g => ({ ...g, expenses: g.expenses.filter(e => e.id !== id) }));
     showToast('Expense deleted', 'trash');
   };
   const saveSettlement = s => {
+    pendingPush.current = true;
     patchGroup(g => ({ ...g, settlements: [...g.settlements, s] }));
     setSheet(null); setSelected(null);
     showToast('Settlement recorded');
   };
   const deleteSettlement = id => {
+    pendingPush.current = true;
     patchGroup(g => ({ ...g, settlements: g.settlements.filter(s => s.id !== id) }));
     showToast('Settlement removed', 'trash');
   };
   const saveGroup = ({ name, members }) => {
+    pendingPush.current = true;
     const creating = sheet && sheet.type === 'group' && sheet.create;
     setSheet(null); setSelected(null);
     if (creating) {
@@ -1575,6 +1763,54 @@ function App() {
     setSheet({ type: 'group', create: true });
   };
 
+  /* live sync handlers */
+  const shareTrip = async () => {
+    const code = newShareCode();
+    const topic = TOPIC_ROOT + code.toLowerCase();
+    patchGroup(g => ({ ...g, shareCode: { id: topic, code: chunkCode(code) } }));
+    pendingPush.current = true;
+    showToast('Trip is live — share the code', 'sparkle');
+  };
+  const stopShare = () => {
+    const sc = group.shareCode;
+    if (sc && clientRef.current) {
+      try { clientRef.current.publish(sc.id, JSON.stringify({ app: 'splid', ended: true, updatedBy: deviceRef.current }), { qos: 0, retain: true }); } catch (e) {}
+      try { clientRef.current.unsubscribe(sc.id); } catch (e) {}
+    }
+    subRef.current = null;
+    patchGroup(g => { const { shareCode, ...rest } = g; return rest; });
+    showToast('Live sync stopped');
+  };
+  const joinTrip = async code => {
+    const clean = cleanCode(code);
+    if (clean.length < 4) throw new Error('bad-code');
+    const topic = TOPIC_ROOT + clean.toLowerCase();
+    const g = await fetchRetainedGroup(topic);
+    const withShare = { ...g, shareCode: { id: topic, code: chunkCode(clean) } };
+    setDb(d => ({ ...d, groups: [withShare, d.groups[0]] }));
+    setSheet(null); setSelected(null); setTab('balance');
+    showToast('Joined ' + (withShare.name || 'shared trip'), 'sparkle');
+  };
+  const restoreBackup = () => {
+    setDb(d => ({ ...d, groups: [d.groups[1] || d.groups[0], d.groups[0]] }));
+    setSheet(null); setSelected(null);
+    showToast('Previous trip restored', 'replay');
+  };
+
+  /* live sync — debounced publish on local edits (retained) */
+  useEffect(() => {
+    if (!pendingPush.current) return;
+    const sc = group.shareCode;
+    if (!sc) { pendingPush.current = false; return; }
+    const t = setTimeout(() => {
+      pendingPush.current = false;
+      try {
+        ensureLive().publish(sc.id, JSON.stringify({ app: 'splid', v: 3, group, updatedBy: deviceRef.current, updatedAt: Date.now() }), { qos: 0, retain: true });
+      } catch (e) { pendingPush.current = true; }
+    }, 700);
+    return () => clearTimeout(t);
+  }, [group]);
+
   const finishTour = () => {
     setTourOpen(false);
     setDb(d => d.tourDone ? d : { ...d, tourDone: true });
@@ -1585,13 +1821,14 @@ function App() {
   const openAdd = initial => setSheet(initial ? { type:'add', initial } : { type:'add' });
 
   return html`<div className="min-h-screen dotbg text-ink font-sans antialiased flex flex-col">
-    <${Header} group=${group} total=${total} demo=${db.demo} onSettings=${() => setSheet({ type:'group' })}
+    <${Header} group=${group} total=${total} demo=${db.demo} onSettings=${() => setSheet({ type:'group' })} liveOn=${liveOn}
       onSheet=${() => downloadTripSheet(group, m => showToast(m, 'check'))}/>
 
     <main className="flex-1">
       ${tab === 'balance'
         ? html`<${BalanceTab} group=${group} edges=${edges} net=${net} simplified=${simplified} total=${total}
-            selected=${selected} setSelected=${setSelected} openSettle=${openSettle} onMakeOwn=${makeOwnTrip}/>`
+            selected=${selected} setSelected=${setSelected} openSettle=${openSettle} onMakeOwn=${makeOwnTrip}
+            onJoin=${() => setSheet({ type: 'join' })}/>`
         : html`<${ActivityTab} group=${group} byId=${byId}
             onDelete=${deleteExpense} onEdit=${openAdd} onDeleteSettlement=${deleteSettlement}/>`}
     </main>
@@ -1604,9 +1841,12 @@ function App() {
       group=${group} initial=${sheet.initial} onClose=${() => setSheet(null)} onSave=${saveExpense}/>`}
     ${sheet && sheet.type === 'settle' && html`<${SettleSheet} key=${sheet.preset ? (sheet.preset.from + '>' + sheet.preset.to + sheet.preset.amount) : 'free'}
       group=${group} preset=${sheet.preset} onClose=${() => setSheet(null)} onSave=${saveSettlement}/>`}
+    ${sheet && sheet.type === 'join' && html`<${JoinSheet} onClose=${() => setSheet(null)} onJoin=${joinTrip}/>`}
     ${sheet && sheet.type === 'group' && html`<${GroupSheet} group=${group} isDemo=${db.demo} isCreate=${sheet.create}
       onClose=${() => setSheet(null)} onSaveGroup=${saveGroup} onReset=${resetAll}
       onSheet=${() => downloadTripSheet(group, m => showToast(m, 'check'))}
+      onShare=${shareTrip} onStopShare=${stopShare} onJoinOpen=${() => setSheet({ type: 'join' })}
+      backupName=${db.groups[1] && db.groups[1].name} onRestore=${restoreBackup}
       onReplayTour=${() => { setSheet(null); setTourOpen(true); }}/>`}
 
     <${ToastView} toast=${toast}/>
