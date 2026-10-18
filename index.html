@@ -155,6 +155,9 @@ const ICONS = {
   eye:[P('M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z'),{t:'c',cx:12,cy:12,r:3}],
   eyeOff:[P('M10.7 5.7A9.7 9.7 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a17.9 17.9 0 0 1-2.4 3.2'),P('M6.6 6.6C3.8 8.4 2.5 12 2.5 12s3.5 6.5 9.5 6.5a9.3 9.3 0 0 0 4.4-1.1'),P('M9.9 9.9a3 3 0 1 0 4.2 4.2'),P('M3 3l18 18')],
   logout:[P('M9 21H5.5A1.5 1.5 0 0 1 4 19.5v-15A1.5 1.5 0 0 1 5.5 3H9'),P('M16 17l5-5-5-5'),P('M21 12H9')],
+  clip:[P('m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48')],
+  download:[P('M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'),P('m7 10 5 5 5-5'),P('M12 15V3')],
+  doc:[P('M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2Z'),P('M14 2v6h6'),P('M9 13h6'),P('M9 17h4')],
 };
 
 function Icon({ name, size=18, sw=2, className='' }) {
@@ -420,6 +423,68 @@ const cTopic = (...p) => CHAT_ROOT + p.join('/');
 const normId = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 const newChatId = () => Array.from({ length: 8 }, () => CODE_ABC[Math.floor(Math.random() * CODE_ABC.length)]).join('');
 const freshChat = () => ({ me: null, friends: {}, reqsIn: {}, reqsOut: {}, threads: {}, unread: {}, seenUpto: {} });
+
+/* ---------------- file attachments — any type, up to 200 MB, sent peer-to-peer ----------------
+   MQTT (public broker) only carries the tiny metadata offer + WebRTC signaling.
+   The actual bytes travel browser→browser over an RTCDataChannel, so 200 MB is no problem.
+   Received blobs are kept in IndexedDB — localStorage is far too small for big files. */
+
+const FILE_MAX = 200 * 1024 * 1024;
+const prettyBytes = n => {
+  n = +n || 0;
+  if (n < 1024) return n + ' B';
+  const u = ['KB', 'MB', 'GB']; let i = -1;
+  do { n /= 1024; i++; } while (n >= 1024 && i < u.length - 1);
+  return (n >= 100 ? Math.round(n) : Math.round(n * 10) / 10) + ' ' + u[i];
+};
+const fileKindOf = (mime, name) => {
+  const m = String(mime || ''), n = String(name || '').toLowerCase();
+  if (/^image\//.test(m) || /\.(png|jpe?g|gif|webp|bmp|svg|heic|avif)$/.test(n)) return 'image';
+  if (/^video\//.test(m) || /\.(mp4|mov|mkv|webm|avi|m4v)$/.test(n)) return 'video';
+  if (/^audio\//.test(m) || /\.(mp3|wav|ogg|m4a|aac|flac)$/.test(n)) return 'audio';
+  if (/\.pdf$/.test(n) || m === 'application/pdf') return 'pdf';
+  if (/\.(zip|rar|7z|tar|gz|bz2|xz)$/.test(n)) return 'zip';
+  if (/\.(docx?|xlsx?|pptx?|csv|txt|md|pages)$/.test(n)) return 'doc';
+  return 'file';
+};
+
+/* IndexedDB blob store with in-memory fallback (some contexts block IDB) */
+const FILE_DB = 'splidchat-files';
+let _fileDb = null;
+const memFiles = new Map();
+const idbRun = (mode, fn) => new Promise((res, rej) => {
+  let done = false;
+  const fail = e => { if (!done) { done = true; rej(e || new Error('idb')); } };
+  try {
+    if (typeof indexedDB === 'undefined') { fail(new Error('no-idb')); return; }
+    const open = _fileDb ? Promise.resolve(_fileDb) : new Promise((res2, rej2) => {
+      const rq = indexedDB.open(FILE_DB, 1);
+      rq.onupgradeneeded = () => { try { rq.result.createObjectStore('files'); } catch (e) {} };
+      rq.onsuccess = () => { _fileDb = rq.result; res2(rq.result); };
+      rq.onerror = () => rej2(rq.error || new Error('idb'));
+    });
+    open.then(db => {
+      let tx, rq2;
+      try { tx = db.transaction('files', mode); rq2 = fn(tx.objectStore('files')); }
+      catch (e) { fail(e); return; }
+      tx.oncomplete = () => { if (!done) { done = true; res(rq2 ? rq2.result : undefined); } };
+      tx.onerror = () => fail(tx.error);
+      tx.onabort = () => fail(tx.error);
+    }).catch(fail);
+    setTimeout(() => fail(new Error('idb-timeout')), 20000);
+  } catch (e) { fail(e); }
+});
+const storeFileBlob = async (k, blob) => {
+  try { await idbRun('readwrite', st => st.put(blob, k)); }
+  catch (e) { try { memFiles.set(k, blob); } catch (e2) {} }
+};
+const loadFileBlob = async k => {
+  try {
+    const v = await idbRun('readonly', st => st.get(k));
+    if (v instanceof Blob && v.size) return v;
+  } catch (e) {}
+  return memFiles.get(k) || null;
+};
 
 /* one-shot lookup of a retained chat profile — resolves the profile, or null when free / unreachable */
 function fetchChatProfile(id, timeout) {
@@ -2052,7 +2117,7 @@ function ChatHome({ chat, api, onOpenThread, onAddFriend, onEditProfile }) {
             <span className="flex-1 min-w-0">
               <span className="block text-[14px] font-semibold truncate">${f.name}</span>
               <span className=${'block text-[12.5px] truncate ' + (unread > 0 ? 'text-ink font-semibold' : 'text-muted')}>
-                ${(api.typing[f.id] || 0) > Date.now() ? 'typing…' : last ? (last.mine ? 'You: ' : '') + last.text : 'Say hi — no messages yet'}
+                ${(api.typing[f.id] || 0) > Date.now() ? 'typing…' : last ? (last.kind === 'file' ? (last.mine ? 'You sent a file' : 'Sent a file') + ' · ' + (last.name || '') : (last.mine ? 'You: ' : '') + last.text) : 'Say hi — no messages yet'}
               </span>
             </span>
             <span className="shrink-0 flex flex-col items-end gap-1">
@@ -2167,6 +2232,115 @@ function ProfileSheet({ me, onClose, onSave, onLogout }) {
   <//>`;
 }
 
+const FILE_META = {
+  image: { tint: 'bg-sage-tint text-sage-deep', label: 'Photo' },
+  video: { tint: 'bg-[#F3E8FF] text-[#8B5CF6]', label: 'Video' },
+  audio: { tint: 'bg-[#E3EDFE] text-[#2563C9]', label: 'Audio' },
+  pdf:   { tint: 'bg-rust-tint text-rust-deep', label: 'PDF' },
+  zip:   { tint: 'bg-[#FCEFD4] text-[#B45309]', label: 'Archive' },
+  doc:   { tint: 'bg-[#E3EDFE] text-[#2563C9]', label: 'Document' },
+  file:  { tint: 'bg-paper text-muted', label: 'File' },
+};
+const XFER_ERR = {
+  offline: 'You are offline — tap to retry',
+  wake: 'Couldn’t reach them — tap to retry',
+  drop: 'Transfer interrupted — tap to retry',
+  save: 'Couldn’t save the file — tap to retry',
+  rtc: 'Connection failed — tap to retry',
+};
+
+function FileBubble({ m, peerId, api }) {
+  const x = (api.xfers || {})[m.id] || {};
+  const kind = fileKindOf(m.mime, m.name);
+  const meta = FILE_META[kind] || FILE_META.file;
+  const isImg = kind === 'image';
+  const [have, setHave] = useState(false);
+  const [url, setUrl] = useState('');
+  const done = !m.mine && (x.status === 'done' || have);
+  const showImg = isImg && (m.mine || done);
+
+  useEffect(() => {
+    if (m.mine) return;
+    let dead = false;
+    api.loadFile(m.id).then(b => { if (!dead && b) setHave(true); });
+    return () => { dead = true; };
+  }, [m.id, m.mine]);
+
+  useEffect(() => {
+    if (!showImg) return;
+    let dead = false, created = '';
+    const f = m.mine ? api.peekOutFile(m.id) : null;
+    const use = b => { if (b && b.size <= 31457280) { created = URL.createObjectURL(b); if (!dead) setUrl(created); else URL.revokeObjectURL(created); } };
+    if (f) use(f);
+    else api.loadFile(m.id).then(use);
+    return () => { dead = true; if (created) URL.revokeObjectURL(created); };
+  }, [showImg, m.id, m.mine]);
+
+  const grab = () => {
+    if (done || x.status === 'wait' || x.status === 'run') return;
+    api.startDownload(peerId, m.id);
+  };
+  const saveBlob = async () => {
+    const b = await api.loadFile(m.id);
+    if (!b) return;
+    const u = URL.createObjectURL(b);
+    const a = document.createElement('a');
+    a.href = u; a.download = m.name || 'file';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(u), 60000);
+  };
+  const viewBlob = async () => {
+    const b = m.mine ? (api.peekOutFile(m.id) || null) : await api.loadFile(m.id);
+    if (b) window.open(URL.createObjectURL(b), '_blank');
+  };
+
+  const pct = Math.max(0, Math.min(100, Math.round((x.pct || 0) * 100)));
+  return html`<div className=${'px-3 py-2.5 ' + (m.mine ? 'bg-ink text-paper rounded-2xl rounded-br-md' : 'bg-card border border-line text-ink rounded-2xl rounded-bl-md')}>
+    ${showImg && url && html`<button onClick=${viewBlob} className="block mb-2" aria-label="View photo">
+      <img src=${url} alt=${m.name || 'photo'} className="max-h-56 w-auto rounded-xl ${m.mine ? 'border border-paper/20' : 'border border-line'}"/>
+    </button>`}
+    <div className="flex items-center gap-2.5 min-w-[190px] max-w-full">
+      ${(!showImg || !url) && html`<span className=${'w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ' + (m.mine ? 'bg-paper/10 text-paper/85' : meta.tint)}>
+        <${Icon} name=${isImg ? 'camera' : 'doc'} size=${16}/>
+      </span>`}
+      <span className="flex-1 min-w-0">
+        <span className="block text-[13.5px] font-semibold truncate">${m.name || 'file'}</span>
+        <span className=${'block text-[11px] numtab ' + (m.mine ? 'text-paper/55' : 'text-muted')}>${prettyBytes(m.size)} · ${meta.label}</span>
+      </span>
+    </div>
+    ${m.mine && html`<div className=${'mt-1.5 text-[10.5px] font-bold numtab ' + (x.status === 'ack' ? 'text-[#3DDC5C]' : 'text-paper/50')}>
+      ${x.status === 'run' ? 'Sending · ' + pct + '%'
+        : x.status === 'sent' ? 'Sent — waiting for them to download'
+        : x.status === 'ack' ? 'Delivered'
+        : x.status === 'err' ? 'Interrupted'
+        : 'Sent'}
+    </div>`}
+    ${m.mine && x.status === 'run' && html`<div className="mt-1 h-1 rounded-full bg-paper/20 overflow-hidden">
+      <div className="h-full bg-[#3DDC5C] rounded-full transition-all duration-300" style=${{ width: Math.max(3, pct) + '%' }}></div>
+    </div>`}
+    ${!m.mine && (x.status === 'run' || x.status === 'wait') && html`<div className="mt-2">
+      ${x.status === 'run' && html`<div className="h-1.5 rounded-full bg-paper border border-line overflow-hidden">
+        <div className="h-full bg-sage rounded-full transition-all duration-300" style=${{ width: Math.max(3, pct) + '%' }}></div>
+      </div>`}
+      <div className=${'mt-1 text-[10.5px] font-bold numtab flex items-center gap-1.5 ' + (x.status === 'run' ? 'text-sage-deep' : 'text-muted')}>
+        <span className=${'w-1.5 h-1.5 rounded-full ' + (x.status === 'run' ? 'bg-sage live-dot' : 'bg-muted live-dot')}></span>
+        ${x.status === 'run' ? 'Receiving · ' + pct + '%' : 'Connecting…'}
+      </div>
+    </div>`}
+    ${!m.mine && x.status === 'gone' && html`<div className="mt-1.5 text-[11px] font-semibold text-muted">No longer available on their device</div>`}
+    ${!m.mine && x.status === 'err' && html`<button onClick=${grab} className="mt-1.5 text-[11px] font-bold text-rust hover:underline text-left">${XFER_ERR[x.err] || 'Tap to retry'}</button>`}
+    ${!m.mine && done && html`<div className="mt-2 flex items-center gap-2">
+      <button onClick=${saveBlob} className="inline-flex items-center gap-1.5 rounded-full bg-sage text-paper text-[11.5px] font-bold px-3 py-1.5 hover:bg-sage-deep active:scale-95 transition">
+        <${Icon} name="download" size=${12} sw=${2.4}/>Save
+      </button>
+      ${!isImg && html`<button onClick=${viewBlob} className="rounded-full border border-line text-muted text-[11.5px] font-bold px-3 py-1.5 hover:text-ink hover:border-muted transition">Open</button>`}
+    </div>`}
+    ${!m.mine && !x.status && !done && html`<button onClick=${grab} className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-ink text-paper text-[11.5px] font-bold px-3 py-1.5 hover:bg-ink/90 active:scale-95 transition">
+      <${Icon} name="download" size=${12} sw=${2.4}/>Download
+    </button>`}
+  </div>`;
+}
+
 function ChatThread({ peer, chat, api, onBack }) {
   const msgs = (chat.threads || {})[peer.id] || [];
   const seen = (chat.seenUpto || {})[peer.id] || 0;
@@ -2175,6 +2349,7 @@ function ChatThread({ peer, chat, api, onBack }) {
   const [confirmDel, setConfirmDel] = useState(false);
   const scRef = useRef(null);
   const inputRef = useRef(null);
+  const fileRef = useRef(null);
 
   useEffect(() => { const el = scRef.current; if (el) el.scrollTop = el.scrollHeight; }, [msgs.length, typingNow]);
   useEffect(() => { api.markRead(peer.id); if (inputRef.current && window.innerWidth > 640) inputRef.current.focus(); }, [peer.id]);
@@ -2189,6 +2364,12 @@ function ChatThread({ peer, chat, api, onBack }) {
     setText('');
     api.sendMsg(peer.id, t);
     if (inputRef.current) inputRef.current.focus();
+  };
+
+  const onPickFile = e => {
+    const f = e.target.files && e.target.files[0];
+    try { e.target.value = ''; } catch (err) {}
+    if (f) api.attachFile(peer.id, f);
   };
 
   const groups = [];
@@ -2231,9 +2412,11 @@ function ChatThread({ peer, chat, api, onBack }) {
         ${groups.map(g => html`<div key=${g.label}>
           <div className="flex justify-center my-3.5"><span className="text-[10.5px] font-bold tracking-[.16em] uppercase text-muted bg-card border border-line rounded-full px-3 py-1">${g.label}</span></div>
           ${g.items.map(m => html`<div key=${m.id} className="msg-in flex mb-1.5 ${m.mine ? 'justify-end' : 'justify-start'}">
-            <div className=${'max-w-[80%] sm:max-w-[68%] px-3.5 py-2 ' + (m.mine ? 'bg-ink text-paper rounded-2xl rounded-br-md' : 'bg-card border border-line text-ink rounded-2xl rounded-bl-md')}>
-              <div className="text-[14px] leading-snug break-words whitespace-pre-wrap">${m.text}</div>
-              <div className=${'mt-0.5 flex items-center justify-end gap-1 text-[10px] numtab ' + (m.mine ? 'text-paper/45' : 'text-muted')}>
+            <div className=${'max-w-[86%] sm:max-w-[72%] ' + (m.kind === 'file' ? '' : 'px-3.5 py-2 ' + (m.mine ? 'bg-ink text-paper rounded-2xl rounded-br-md' : 'bg-card border border-line text-ink rounded-2xl rounded-bl-md'))}>
+              ${m.kind === 'file'
+                ? html`<${FileBubble} m=${m} peerId=${peer.id} api=${api}/>`
+                : html`<div className="text-[14px] leading-snug break-words whitespace-pre-wrap">${m.text}</div>`}
+              <div className=${'mt-0.5 flex items-center justify-end gap-1 text-[10px] numtab ' + (m.mine && m.kind !== 'file' ? 'text-paper/45' : 'text-muted')}>
                 <span>${timeLabel(m.ts)}</span>
                 ${m.mine && html`<span className="ml-0.5 inline-flex">${seen >= m.ts
                   ? html`<${Icon} name="checkCheck" size=${13} sw=${2.4} className="text-[#3DDC5C]"/>`
@@ -2252,6 +2435,11 @@ function ChatThread({ peer, chat, api, onBack }) {
 
     <div className="shrink-0 border-t border-line bg-card/95 backdrop-blur-md">
       <div className="max-w-3xl mx-auto px-3 sm:px-6 py-3 flex items-center gap-2">
+        <input ref=${fileRef} type="file" className="hidden" onChange=${onPickFile}/>
+        <button onClick=${() => { if (fileRef.current) fileRef.current.click(); }} aria-label="Attach a file" title="Attach any file type · up to 200 MB"
+          className="shrink-0 w-10 h-10 rounded-full bg-paper border border-line text-muted hover:text-ink hover:border-muted flex items-center justify-center transition active:scale-90">
+          <${Icon} name="clip" size=${16}/>
+        </button>
         <input ref=${inputRef} className="inp !rounded-full flex-1" placeholder="Message…" maxLength=${1000} value=${text}
           onChange=${e => { setText(e.target.value); api.pingTyping(peer.id); }}
           onKeyDown=${e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}/>
@@ -2259,6 +2447,9 @@ function ChatThread({ peer, chat, api, onBack }) {
           className=${'shrink-0 w-10 h-10 rounded-full flex items-center justify-center transition active:scale-90 ' + (text.trim() ? 'bg-ink text-paper hover:bg-ink/90' : 'bg-paper border border-line text-muted')}>
           <${Icon} name="send" size=${16} sw=${2.2}/>
         </button>
+      </div>
+      <div className="max-w-3xl mx-auto px-3 sm:px-6 pb-2 -mt-1">
+        <span className="text-[10px] text-muted">The paperclip sends any file type up to 200 MB — delivered straight to your friend, peer-to-peer.</span>
       </div>
     </div>
   </div>`;
@@ -2484,6 +2675,215 @@ function App() {
   };
   const meCard = me => ({ id: me.id, name: me.name, color: me.color });
 
+  /* ---- file attachments (bytes go P2P over WebRTC; MQTT carries only signals) ---- */
+  const [xfers, setXfers] = useState({});
+  const xfRef = useRef({}); xfRef.current = xfers;
+  const outFiles = useRef(new Map());   // mid -> File handle on this device
+  const pcs = useRef(new Map());        // mid -> { pc, dc, role, open, done, cands }
+  const inBufs = useRef(new Map());     // mid -> receiver reassembly buffer
+  const pullTimers = useRef(new Map());
+
+  const setXfer = (mid, patch) => setXfers(x => ({ ...x, [mid]: { ...(x[mid] || {}), ...patch } }));
+  const teardownXfer = mid => {
+    const p = pcs.current.get(mid);
+    if (p) { try { if (p.dc) p.dc.close(); } catch (e) {} try { if (p.pc) p.pc.close(); } catch (e) {} pcs.current.delete(mid); }
+    inBufs.current.delete(mid);
+    const t = pullTimers.current.get(mid);
+    if (t) { clearTimeout(t); pullTimers.current.delete(mid); }
+  };
+
+  /* pick a file (any type, ≤200 MB) and drop the metadata offer into the friend's inbox */
+  const attachFile = (peerId, file) => {
+    const me = chatRef.current.me;
+    if (!me || !file) return;
+    if (file.size > FILE_MAX) { showToast('Too large — files can be up to 200 MB', 'x'); return; }
+    const mid = uid() + Date.now().toString(36);
+    const meta = { name: String(file.name || 'file').slice(0, 120), size: file.size || 0, mime: file.type || '', ts: Date.now() };
+    outFiles.current.set(mid, file);
+    const ok = chatPublish(cTopic('inbox', peerId, 'off', mid), { app: 'splidchat', type: 'file-offer', id: mid, from: meCard(me), ...meta }, true);
+    if (!ok) { outFiles.current.delete(mid); showToast('Chat is offline — try again when live', 'x'); return; }
+    patchChat(c => {
+      const th = { ...(c.threads || {}) };
+      th[peerId] = [...(th[peerId] || []), { id: mid, mine: true, kind: 'file', ...meta }].slice(-300);
+      return { ...c, threads: th };
+    });
+  };
+
+  /* receiver side: ask the sender's device to start streaming this file */
+  const startDownload = (peerId, mid) => {
+    const me = chatRef.current.me;
+    if (!me || pcs.current.has(mid)) return;
+    const st = (xfRef.current[mid] || {}).status;
+    if (st === 'wait' || st === 'run' || st === 'done') return;
+    const old = pullTimers.current.get(mid); if (old) clearTimeout(old);
+    setXfer(mid, { status: 'wait', pct: 0, err: '' });
+    const ok = chatPublish(cTopic('inbox', peerId, 'pull', mid), { app: 'splidchat', type: 'file-pull', id: mid, from: me.id }, false);
+    if (!ok) { setXfer(mid, { status: 'err', err: 'offline' }); return; }
+    const t = setTimeout(() => {
+      const p = pcs.current.get(mid);
+      if (!p || !p.open) { setXfer(mid, { status: 'err', err: 'wake' }); teardownXfer(mid); }
+    }, 15000);
+    pullTimers.current.set(mid, t);
+  };
+
+  /* sender side: serve a pulled file over a chunked, backpressured data channel */
+  const beginCarrier = (peerId, mid) => {
+    const me = chatRef.current.me;
+    if (!me || pcs.current.has(mid)) return;
+    const file = outFiles.current.get(mid);
+    if (!file) {
+      chatPublish(cTopic('inbox', peerId, 'gone', mid), { app: 'splidchat', type: 'file-gone', id: mid, from: me.id }, false);
+      return;
+    }
+    let pc;
+    try { pc = new RTCPeerConnection({ iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }] }); }
+    catch (e) { return; }
+    const rec = { pc, dc: null, role: 'send', open: false, done: false, cands: [], bytes: 0, lastBytes: -1, lastMove: Date.now() };
+    pcs.current.set(mid, rec);
+    setXfer(mid, { status: 'run', pct: 0, err: '' });
+    const fail = () => {
+      if (rec.done) return;
+      rec.done = true;
+      setXfer(mid, { status: 'err', err: 'drop' });
+      setTimeout(() => teardownXfer(mid), 600);
+    };
+    pc.onconnectionstatechange = () => { const s = pc.connectionState; if ((s === 'failed' || s === 'closed') && !rec.done) fail(); };
+    pc.onicecandidate = e => {
+      if (e.candidate) chatPublish(cTopic('inbox', peerId, 'rtc', mid), { app: 'splidchat', type: 'rtc-ice', id: mid, from: me.id, cand: e.candidate.toJSON() }, false);
+    };
+    const dc = pc.createDataChannel('f', { ordered: true });
+    rec.dc = dc;
+    try { dc.binaryType = 'arraybuffer'; dc.bufferedAmountLowThreshold = 262144; } catch (e) {}
+    const waitLow = () => new Promise(res => {
+      if (dc.bufferedAmount <= 262144) { res(); return; }
+      const h = () => { dc.removeEventListener('bufferedamountlow', h); res(); };
+      dc.addEventListener('bufferedamountlow', h);
+    });
+    const pump = async () => {
+      const CHUNK = 16384, total = file.size || 1;
+      try { dc.send(JSON.stringify({ t: 'hi', id: mid })); } catch (e) {}
+      let off = 0, lastUi = 0;
+      while (off < file.size) {
+        if (dc.readyState !== 'open') throw new Error('closed');
+        const buf = await file.slice(off, off + CHUNK).arrayBuffer();
+        if (dc.readyState !== 'open') throw new Error('closed');
+        dc.send(buf);
+        off += buf.byteLength;
+        rec.bytes = off;
+        const now = Date.now();
+        if (now - lastUi > 350) { lastUi = now; setXfer(mid, { pct: Math.min(1, off / total) }); }
+        if (dc.bufferedAmount > 4194304) await waitLow();
+      }
+      rec.done = true;
+      try { dc.send(JSON.stringify({ t: 'end', id: mid })); } catch (e) {}
+      setXfer(mid, { pct: 1, status: 'sent' });
+      setTimeout(() => { if ((xfRef.current[mid] || {}).status === 'sent') teardownXfer(mid); }, 8000);
+    };
+    dc.onopen = () => { rec.open = true; pump().catch(fail); };
+    pc.createOffer().then(o => pc.setLocalDescription(o)).then(() => {
+      chatPublish(cTopic('inbox', peerId, 'rtc', mid), { app: 'splidchat', type: 'rtc-offer', id: mid, from: me.id, sdp: (pc.localDescription && pc.localDescription.sdp) || '' }, false);
+    }).catch(fail);
+  };
+
+  /* receiver side: answer the sender's WebRTC offer and reassemble the stream */
+  const acceptCarrier = (senderId, mid, sdp) => {
+    const me = chatRef.current.me;
+    if (!me || pcs.current.has(mid)) return;
+    const st = (xfRef.current[mid] || {}).status;
+    if (st !== 'wait' && st !== 'err') return;
+    const old = pullTimers.current.get(mid); if (old) { clearTimeout(old); pullTimers.current.delete(mid); }
+    let pc;
+    try { pc = new RTCPeerConnection({ iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }] }); }
+    catch (e) { setXfer(mid, { status: 'err', err: 'rtc' }); return; }
+    const rec = { pc, dc: null, role: 'recv', open: false, done: false, cands: [], lastBytes: -1, lastMove: Date.now() };
+    pcs.current.set(mid, rec);
+    const buf = { chunks: [], got: 0, lastUi: 0, finished: false, total: 0 };
+    buf.total = ((((chatRef.current.threads || {})[senderId] || []).find(x => x.id === mid) || {}).size) || 0;
+    inBufs.current.set(mid, buf);
+    const fail = () => {
+      if (rec.done) return;
+      rec.done = true;
+      buf.finished = true; buf.chunks.length = 0;
+      setXfer(mid, { status: 'err', err: 'drop' });
+      setTimeout(() => teardownXfer(mid), 600);
+    };
+    pc.onconnectionstatechange = () => { const s = pc.connectionState; if ((s === 'failed' || s === 'closed') && !rec.open && !rec.done) fail(); };
+    pc.onicecandidate = e => {
+      if (e.candidate) chatPublish(cTopic('inbox', senderId, 'rtc', mid), { app: 'splidchat', type: 'rtc-ice', id: mid, from: me.id, cand: e.candidate.toJSON() }, false);
+    };
+    pc.ondatachannel = ev => {
+      const dc = ev.channel;
+      rec.dc = dc; rec.open = true;
+      try { dc.binaryType = 'arraybuffer'; } catch (e) {}
+      setXfer(mid, { status: 'run', pct: 0, err: '' });
+      dc.onmessage = e => {
+        if (typeof e.data === 'string') {
+          let j; try { j = JSON.parse(e.data); } catch (err2) { return; }
+          if (j && j.t === 'end') finishIn(senderId, mid);
+          return;
+        }
+        buf.chunks.push(e.data);
+        buf.got += (e.data.byteLength || 0);
+        const now = Date.now();
+        if (now - buf.lastUi > 350 && buf.total) { buf.lastUi = now; setXfer(mid, { pct: Math.min(1, buf.got / buf.total) }); }
+      };
+      dc.onclose = () => {
+        if (!buf.finished && !rec.done) {
+          rec.done = true; buf.finished = true; buf.chunks.length = 0;
+          setXfer(mid, { status: 'err', err: 'drop' });
+          setTimeout(() => teardownXfer(mid), 600);
+        }
+      };
+    };
+    pc.setRemoteDescription({ type: 'offer', sdp }).then(() => {
+      rec.cands.forEach(c => { try { pc.addIceCandidate(c).catch(() => {}); } catch (e) {} });
+      rec.cands = [];
+      return pc.createAnswer();
+    }).then(a => pc.setLocalDescription(a)).then(() => {
+      chatPublish(cTopic('inbox', senderId, 'rtc', mid), { app: 'splidchat', type: 'rtc-answer', id: mid, from: me.id, sdp: (pc.localDescription && pc.localDescription.sdp) || '' }, false);
+    }).catch(fail);
+  };
+
+  /* receiver: all chunks arrived — persist the blob and ack the sender */
+  const finishIn = async (peerId, mid) => {
+    const buf = inBufs.current.get(mid);
+    const rec = pcs.current.get(mid);
+    if (!buf || buf.finished) return;
+    buf.finished = true;
+    if (rec) rec.done = true;
+    setXfer(mid, { pct: 1 });
+    try {
+      const blob = new Blob(buf.chunks);
+      buf.chunks.length = 0;
+      await storeFileBlob(mid, blob);
+      setXfer(mid, { status: 'done', pct: 1 });
+      const me = chatRef.current.me;
+      if (me) chatPublish(cTopic('inbox', peerId, 'ack', mid), { app: 'splidchat', type: 'file-done', id: mid, by: me.id }, false);
+    } catch (e) {
+      setXfer(mid, { status: 'err', err: 'save' });
+    }
+    teardownXfer(mid);
+  };
+
+  /* stall watchdog — a transfer that moves no bytes for 30s is declared dead */
+  useEffect(() => {
+    const iv = setInterval(() => {
+      const now = Date.now();
+      pcs.current.forEach((rec, mid) => {
+        if (rec.done || !rec.open) return;
+        const moved = rec.role === 'recv' ? (inBufs.current.get(mid) || {}).got : rec.bytes;
+        if (moved !== rec.lastBytes) { rec.lastBytes = moved; rec.lastMove = now; return; }
+        if (now - rec.lastMove > 30000) {
+          setXfer(mid, { status: 'err', err: 'drop' });
+          if (rec.role === 'recv') { const b = inBufs.current.get(mid); if (b) { b.finished = true; b.chunks.length = 0; } }
+          rec.done = true;
+          teardownXfer(mid);
+        }
+      });
+    }, 6000);
+    return () => clearInterval(iv);
+  }, []);
+
   const onChatMsg = (topic, payload) => {
     const me = chatRef.current.me; if (!me) return;
     const inboxRoot = cTopic('inbox', me.id, '');
@@ -2536,6 +2936,47 @@ function App() {
         });
         if (openNow) chatPublish(cTopic('inbox', fid, 'read'), { app:'splidchat', type:'read', by: me.id, upto: d.ts || Date.now() }, false);
         else showToast('New message from ' + firstName(d.from.name), 'chat');
+      } else if (d.type === 'file-offer' && d.from && d.from.id && d.from.id !== me.id && d.id) {
+        chatPublish(topic, null, true);
+        const fid = d.from.id;
+        if (!chatRef.current.friends[fid]) return;
+        const th0 = (chatRef.current.threads || {})[fid] || [];
+        if (th0.some(x => x.id === d.id)) return;
+        const openNow = chatOpenRef.current && chatThreadRef.current === fid;
+        patchChat(c => {
+          const th = { ...(c.threads || {}) };
+          th[fid] = [...(th[fid] || []), { id: d.id, mine: false, kind: 'file', name: d.name || 'file', size: d.size || 0, mime: d.mime || '', ts: d.ts || Date.now() }].slice(-300);
+          const un = { ...(c.unread || {}) };
+          if (!openNow) un[fid] = (un[fid] || 0) + 1;
+          return { ...c, threads: th, unread: un };
+        });
+        if (openNow) chatPublish(cTopic('inbox', fid, 'read'), { app:'splidchat', type:'read', by: me.id, upto: d.ts || Date.now() }, false);
+        else showToast(firstName(d.from.name) + ' sent you a file', 'doc');
+      } else if (d.type === 'file-pull' && d.from && chatRef.current.friends[d.from] && d.from !== me.id && d.id) {
+        beginCarrier(d.from, d.id);
+      } else if (d.type === 'file-gone' && d.from && chatRef.current.friends[d.from] && d.from !== me.id && d.id) {
+        setXfer(d.id, { status: 'gone' });
+        teardownXfer(d.id);
+      } else if (d.type === 'file-done' && d.by && chatRef.current.friends[d.by] && d.by !== me.id && d.id) {
+        setXfer(d.id, { status: 'ack', pct: 1 });
+        teardownXfer(d.id);
+      } else if (d.type === 'rtc-offer' && d.from && chatRef.current.friends[d.from] && d.from !== me.id && d.id && d.sdp) {
+        acceptCarrier(d.from, d.id, d.sdp);
+      } else if (d.type === 'rtc-answer' && d.sdp && d.from && d.from !== me.id && d.id) {
+        const rec = pcs.current.get(d.id);
+        if (rec && rec.role === 'send' && rec.pc.signalingState === 'have-local-offer') {
+          rec.pc.setRemoteDescription({ type: 'answer', sdp: d.sdp }).then(() => {
+            (rec.cands || []).forEach(c => { try { rec.pc.addIceCandidate(c).catch(() => {}); } catch (e) {} });
+            rec.cands = [];
+          }).catch(() => {});
+        }
+      } else if (d.type === 'rtc-ice' && d.cand && d.from && d.from !== me.id && d.id) {
+        const rec = pcs.current.get(d.id);
+        if (rec && rec.pc) {
+          const hasRemote = !!(rec.pc.remoteDescription && rec.pc.remoteDescription.type);
+          if (hasRemote) { try { rec.pc.addIceCandidate(d.cand).catch(() => {}); } catch (e) {} }
+          else rec.cands.push(d.cand);
+        }
       } else if (d.type === 'read' && d.by && chatRef.current.friends[d.by] && d.by !== me.id) {
         patchChat(c => ({ ...c, seenUpto: { ...(c.seenUpto || {}), [d.by]: Math.max((c.seenUpto || {})[d.by] || 0, d.upto || 0) } }));
       } else if (d.type === 'typ' && d.from && chatRef.current.friends[d.from] && d.from !== me.id) {
@@ -2711,6 +3152,7 @@ function App() {
     if (c) { try { c.end(true); } catch (e) {} }
     chatClientRef.current = null;
     chatSubsRef.current = new Set();
+    Array.from(new Set([...pcs.current.keys(), ...pullTimers.current.keys()])).forEach(teardownXfer);
     setPresence({}); setTyping({}); setChatOn(false); setChatView('home');
     restoreRef.current = false;
     patchChat(() => freshChat());
@@ -2807,7 +3249,7 @@ function App() {
     if (chat.me) chatPublish(cTopic('inbox', fid, 'typ'), { app:'splidchat', type:'typ', from: chat.me.id }, false);
   };
 
-  const chatApi = { online: chatOn, presence, typing, createIdentity, signIn: signInIdentity, logout: logoutChat, updateProfile, sendFriendReq, acceptReq, declineReq, cancelReq, unfriend, sendMsg, markRead, pingTyping };
+  const chatApi = { online: chatOn, presence, typing, xfers, createIdentity, signIn: signInIdentity, logout: logoutChat, updateProfile, sendFriendReq, acceptReq, declineReq, cancelReq, unfriend, sendMsg, markRead, pingTyping, attachFile, startDownload, peekOutFile: mid => outFiles.current.get(mid) || null, loadFile: mid => loadFileBlob(mid) };
 
   const saveExpense = exp => {
     pendingPush.current = true;
