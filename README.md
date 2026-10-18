@@ -1,5 +1,5 @@
 # Hisaab
-https://splid.splid.workers.dev/
+https://splid.unfo.workers.dev/
 <img width="3200" height="1800" alt="Hisaab — Ad (16 9, detailed)@2x" src="https://github.com/user-attachments/assets/94b6b43b-7df0-47f2-b964-09572814b3fc" />
 
 **Who owes whom, at a glance.**
