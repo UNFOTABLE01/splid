@@ -72,6 +72,10 @@ tailwind.config = {
   .pp-tick{display:inline-flex;animation:ppTickIn .34s cubic-bezier(.34,1.56,.64,1) both}
   @keyframes toastIn{from{transform:translateY(16px);opacity:0}to{transform:none;opacity:1}}
   .toast-in{animation:toastIn .32s cubic-bezier(.2,1.1,.4,1) both}
+  @keyframes typDot{0%,60%,100%{transform:translateY(0);opacity:.35}30%{transform:translateY(-3px);opacity:1}}
+  .typ-dot{width:5px;height:5px;border-radius:50%;background:currentColor;animation:typDot 1.15s ease-in-out infinite}
+  .typ-dot:nth-child(2){animation-delay:.15s}
+  .typ-dot:nth-child(3){animation-delay:.3s}
 
   input[type=range]{-webkit-appearance:none;appearance:none;background:transparent;height:20px;cursor:pointer;width:100%}
   input[type=range]:disabled{opacity:.35;cursor:default}
@@ -139,6 +143,12 @@ const ICONS = {
   replay:[P('M3 12a9 9 0 1 0 9-9 9.7 9.7 0 0 0-6.74 2.74L3 8'),P('M3 3v5h5')],
   users:[P('M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2'),{t:'c',cx:9.5,cy:7,r:4},P('M22 21v-2a4 4 0 0 0-3-3.87'),P('M15.5 3.13a4 4 0 0 1 0 7.75')],
   github:[P('M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4'),P('M9 18c-4.51 2-5-2-7-2')],
+  chat:[P('M7.9 20A9 9 0 1 0 4 16.1L2 22Z')],
+  send:[P('M22 2 11 13'),P('M22 2 15 22 11 13 2 9 22 2Z')],
+  userPlus:[P('M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2'),{t:'c',cx:9,cy:7,r:4},P('M19 8v6'),P('M22 11h-6')],
+  copy:[P('M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'),P('M11 9h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Z')],
+  at:[P('M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8'),{t:'c',cx:12,cy:12,r:4}],
+  checkCheck:[P('M18 6 7 17l-5-5'),P('m22 10-7.5 7.5L13 16')],
 };
 
 function Icon({ name, size=18, sw=2, className='' }) {
@@ -397,6 +407,37 @@ function fetchRetainedGroup(topic) {
   });
 }
 
+/* ---------------- splid chat · ids, friends & 1:1 messages ---------------- */
+
+const CHAT_ROOT = 'splidchat/v1/';
+const cTopic = (...p) => CHAT_ROOT + p.join('/');
+const normId = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+const newChatId = () => Array.from({ length: 8 }, () => CODE_ABC[Math.floor(Math.random() * CODE_ABC.length)]).join('');
+const freshChat = () => ({ me: null, friends: {}, reqsIn: {}, reqsOut: {}, threads: {}, unread: {}, seenUpto: {} });
+
+/* one-shot lookup of a retained chat profile — resolves the profile, or null when free / unreachable */
+function fetchChatProfile(id, timeout) {
+  return new Promise(resolve => {
+    if (typeof mqtt === 'undefined') { resolve(null); return; }
+    let c;
+    try { c = mqtt.connect(MQTT_URL, { clientId: 'splidq-' + uid(), keepalive: 20, reconnectPeriod: 0, connectTimeout: 6000 }); }
+    catch (e) { resolve(null); return; }
+    let done = false;
+    const finish = v => { if (done) return; done = true; clearTimeout(to); try { c.end(true); } catch (e) {} resolve(v); };
+    const to = setTimeout(() => finish(null), timeout || 4500);
+    c.on('connect', () => { try { c.subscribe(cTopic('profile', id), { qos: 0 }); } catch (e) {} });
+    c.on('message', (t, payload) => {
+      const s = payload.toString();
+      if (!s) { finish(null); return; }
+      try {
+        const d = JSON.parse(s);
+        if (d && d.app === 'splidchat' && d.profile && d.profile.id === id) finish(d.profile);
+      } catch (e) {}
+    });
+    c.on('error', () => finish(null));
+  });
+}
+
 /* ---------------- seed demo data ---------------- */
 
 function seedGroup() {
@@ -416,7 +457,7 @@ function seedGroup() {
     settlements: [],
   };
 }
-const freshDemoDb = () => ({ v: 3, demo: true, tourDone: false, deviceId: uid(), groups: [seedGroup()] });
+const freshDemoDb = () => ({ v: 3, demo: true, tourDone: false, deviceId: uid(), groups: [seedGroup()], chat: freshChat() });
 
 /* ---------------- tiny hooks ---------------- */
 
@@ -523,7 +564,7 @@ function Sheet({ title, onClose, children, footer, wide }) {
     document.body.style.overflow = 'hidden';
     return () => { window.removeEventListener('keydown', h); document.body.style.overflow = prev; };
   }, []);
-  return html`<div className="fixed inset-0 z-50">
+  return html`<div className="fixed inset-0 z-[75]">
     <div className="absolute inset-0 bg-ink/40 backdrop-in" onClick=${onClose}></div>
     <div className="absolute inset-0 flex items-end sm:items-center justify-center pointer-events-none p-0 sm:p-6">
       <div className=${'pointer-events-auto sheet-in w-full ' + (wide ? 'sm:max-w-lg' : 'sm:max-w-md') +
@@ -585,6 +626,7 @@ const TOUR_STEPS = [
   { target:'tour-settle', title:"Settle up in one tap", body:"When someone pays you back, record it — fully or partially. The graph, balances and history update instantly." },
   { target:'tour-add', title:"Three taps to log an expense", body:"Amount \u2192 who paid \u2192 Add. Equal split is the default; switch to sliders or percentages anytime." },
   { target:'tour-activity', title:"A story, not a spreadsheet", body:"Expenses and settlements stream in chronologically. Tap any entry to see the exact split — or edit it." },
+  { target:'tour-chat', title:"Chat with your crew", body:"Tap the chat bubble to make your Splid ID — then add friends by their ID. Once they accept your request, you can talk one-on-one." },
   { title:"Make it yours", body:"This demo lives only in your browser. When you\u2019re ready, wipe it and set up your own group — everything is editable: rename, members, expenses, settlements.", final:true },
 ];
 
@@ -1568,9 +1610,422 @@ function JoinSheet({ onClose, onJoin }) {
   <//>`;
 }
 
+/* ---------------- splid chat ui ---------------- */
+
+function ChatIdCopy({ id, big }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    const done = () => { setCopied(true); setTimeout(() => setCopied(false), 1600); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(id).then(done, done);
+    else {
+      const ta = document.createElement('textarea');
+      ta.value = id; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); } catch (e) {}
+      ta.remove(); done();
+    }
+  };
+  return html`<button onClick=${copy} aria-label="Copy Splid ID" title="Copy your ID"
+    className="shrink-0 inline-flex items-center gap-2 bg-paper border border-line rounded-full pl-3.5 pr-1.5 py-1.5 hover:border-muted transition active:scale-95">
+    <code className=${'font-mono font-bold tracking-[.12em] numtab ' + (big ? 'text-[15px]' : 'text-[12.5px]')}>${chunkCode(id)}</code>
+    <span className=${'w-6 h-6 rounded-full flex items-center justify-center shrink-0 transition ' + (copied ? 'bg-sage text-paper' : 'bg-ink text-paper')}>
+      <${Icon} name=${copied ? 'check' : 'copy'} size=${12} sw=${2.4}/>
+    </span>
+  </button>`;
+}
+
+function ChatOnboard({ onCreate }) {
+  const [name, setName] = useState('');
+  const [mode, setMode] = useState('auto');
+  const [auto, setAuto] = useState(newChatId());
+  const [custom, setCustom] = useState('');
+  const [color, setColor] = useState(AV[Math.floor(Math.random() * AV.length)]);
+  const [chk, setChk] = useState('idle');
+  const [busy, setBusy] = useState(false);
+
+  const idv = mode === 'auto' ? auto : normId(custom);
+  const idOk = idv.length >= 3 && idv.length <= 14;
+
+  useEffect(() => {
+    if (!idOk) { setChk('idle'); return; }
+    let live = true;
+    setChk('checking');
+    const t = setTimeout(async () => {
+      const p = await fetchChatProfile(idv);
+      if (live) setChk(p ? 'taken' : 'free');
+    }, 650);
+    return () => { live = false; clearTimeout(t); };
+  }, [idv]);
+
+  const canCreate = name.trim().length >= 1 && idOk && chk !== 'checking' && chk !== 'taken' && !busy;
+
+  const create = async () => {
+    if (!canCreate) return;
+    setBusy(true);
+    const res = await onCreate({ name, id: idv, color });
+    if (res && res.taken) setChk('taken');
+    setBusy(false);
+  };
+
+  return html`<div className="flex-1 overflow-y-auto flex items-start sm:items-center justify-center p-4">
+    <div className="sheet-in w-full max-w-md bg-card border border-line rounded-3xl shadow-pop p-5 sm:p-6 my-4">
+      <div className="flex flex-col items-center text-center">
+        <span className="w-12 h-12 rounded-2xl bg-ink text-paper flex items-center justify-center shadow-soft">
+          <${Icon} name="chat" size=${22}/>
+        </span>
+        <h2 className="font-display text-[22px] font-semibold mt-3 leading-tight">Make your Splid ID</h2>
+        <p className="text-[13px] text-muted mt-1.5 leading-relaxed max-w-[300px]">One ID, all your chats. Add friends with their ID, they accept, and you talk — no phone number needed.</p>
+      </div>
+
+      <div className="mt-5">
+        <label className="lbl">Your name</label>
+        <input className="inp" placeholder="What should friends call you?" maxLength=${24} value=${name}
+          onChange=${e => setName(e.target.value)}/>
+      </div>
+
+      <div className="mt-4">
+        <div className="flex items-center justify-between mb-2">
+          <label className="lbl" style=${{ marginBottom: 0 }}>Your ID</label>
+          <div className="flex bg-paper border border-line rounded-full p-0.5 text-[11.5px] font-semibold">
+            ${[['auto','Auto'],['custom','Pick my own']].map(([k, l]) => html`<button key=${k} onClick=${() => setMode(k)}
+              className=${'px-2.5 py-1 rounded-full transition ' + (mode === k ? 'bg-ink text-paper' : 'text-muted hover:text-ink')}>${l}</button>`)}
+          </div>
+        </div>
+        ${mode === 'auto' ? html`<div className="flex gap-2">
+          <div className="inp flex items-center font-mono font-bold tracking-[.14em] text-[16px] numtab select-all">${chunkCode(auto)}</div>
+          <button onClick=${() => setAuto(newChatId())} title="New random ID" aria-label="Shuffle ID"
+            className="shrink-0 w-11 rounded-xl bg-paper border border-line text-muted hover:text-ink hover:border-muted flex items-center justify-center transition active:scale-95">
+            <${Icon} name="replay" size=${16}/>
+          </button>
+        </div>`
+        : html`<input className="inp font-mono font-bold tracking-[.14em] uppercase text-[16px]" placeholder="PICK-ANY-NAME" spellCheck=${false}
+            maxLength=${14} value=${custom} onChange=${e => setCustom(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}/>`}
+        <div className="mt-2 text-[12px] font-semibold flex items-center gap-1.5 min-h-[18px]">
+          ${chk === 'checking' && html`<span className="w-1.5 h-1.5 rounded-full bg-sage live-dot"></span><span className="text-muted">Checking if it’s free…</span>`}
+          ${chk === 'free' && idOk && html`<span className="w-1.5 h-1.5 rounded-full bg-sage"></span><span className="text-sage-deep">${chunkCode(idv)} is free — grab it!</span>`}
+          ${chk === 'taken' && html`<span className="w-1.5 h-1.5 rounded-full bg-rust"></span><span className="text-rust-deep">Already taken — try another</span>`}
+          ${chk === 'idle' && html`<span className="text-muted">${mode === 'custom' ? '3–14 letters & numbers' : 'Tap shuffle for a different ID'}</span>`}
+        </div>
+      </div>
+
+      <div className="mt-4">
+        <label className="lbl">Your color</label>
+        <div className="flex flex-wrap gap-2">
+          ${AV.map(c => html`<button key=${c} onClick=${() => setColor(c)} aria-label=${'Color ' + c}
+            className=${'w-8 h-8 rounded-full transition active:scale-90 ' + (color === c ? 'ring-2 ring-offset-2 ring-ink ring-offset-card' : 'hover:scale-110')}
+            style=${{ background: c }}></button>`)}
+        </div>
+      </div>
+
+      <button onClick=${create} disabled=${!canCreate}
+        className=${'mt-6 w-full rounded-full py-3 text-[14px] font-semibold transition active:scale-[.98] ' +
+          (canCreate ? 'bg-ink text-paper hover:bg-ink/90' : 'bg-ink/20 text-paper cursor-not-allowed')}>
+        ${busy ? 'Creating your ID…' : 'Create my ID'}
+      </button>
+      <p className="text-[11px] text-muted mt-3 text-center leading-relaxed">Your ID is public so friends can find you — pick a name you’re happy to share. Chats stay stored only on this device.</p>
+    </div>
+  </div>`;
+}
+
+function ChatHome({ chat, api, onOpenThread, onAddFriend }) {
+  const me = chat.me;
+  const friends = Object.values(chat.friends || {});
+  const reqsIn = Object.values(chat.reqsIn || {}).sort((a, b) => b.ts - a.ts);
+  const reqsOut = Object.values(chat.reqsOut || {}).sort((a, b) => b.ts - a.ts);
+  const lastOf = fid => { const a = (chat.threads || {})[fid] || []; return a[a.length - 1] || null; };
+  const rows = friends.map(f => ({ f, last: lastOf(f.id), unread: (chat.unread || {})[f.id] || 0 }))
+    .sort((a, b) => (b.last ? b.last.ts : (b.f.since || 0)) - (a.last ? a.last.ts : (a.f.since || 0)));
+  const when = ts => new Date(ts).toDateString() === new Date().toDateString() ? timeLabel(ts) : dayLabel(ts);
+
+  return html`<div className="flex-1 overflow-y-auto">
+    <div className="max-w-3xl mx-auto px-4 sm:px-6 pt-5 pb-24">
+
+      <div className="bg-card border border-line rounded-3xl shadow-soft p-4 sm:p-5 flex items-center gap-3.5">
+        <${Avatar} m=${me} size=${48}/>
+        <div className="flex-1 min-w-0">
+          <div className="font-display text-[18px] font-semibold leading-tight truncate">${me.name}</div>
+          <div className="text-[11px] font-bold tracking-[.14em] uppercase text-muted mt-0.5">My Splid ID</div>
+        </div>
+        <${ChatIdCopy} id=${me.id}/>
+      </div>
+
+      <button onClick=${onAddFriend} className="group w-full mt-4 flex items-center gap-3.5 rounded-3xl bg-ink text-paper px-4 sm:px-5 py-4 text-left shadow-pop transition hover:bg-[#1d1913] active:scale-[.99]">
+        <span className="w-10 h-10 rounded-2xl bg-[#3DDC5C]/15 border border-[#3DDC5C]/30 text-[#3DDC5C] flex items-center justify-center shrink-0 transition-transform duration-300 group-hover:rotate-12">
+          <${Icon} name="userPlus" size=${18}/>
+        </span>
+        <span className="flex-1 min-w-0">
+          <span className="block font-display font-bold tracking-[.15em] text-[13.5px] uppercase leading-tight">Add a friend<span className="text-[#3DDC5C]">.</span></span>
+          <span className="block text-[12px] text-paper/55 mt-1 leading-snug">Enter their Splid ID — they accept, and you can chat.</span>
+        </span>
+        <${Icon} name="arrR" size=${16} className="text-paper/45 shrink-0 transition-transform duration-200 group-hover:translate-x-0.5"/>
+      </button>
+
+      ${reqsIn.length > 0 && html`<div className="mt-6">
+        <div className="flex items-center gap-3 mb-2.5">
+          <span className="text-[11px] font-bold tracking-[.18em] uppercase text-muted">Requests · ${reqsIn.length}</span>
+          <span className="h-px flex-1 bg-line"></span>
+        </div>
+        <div className="space-y-2">
+          ${reqsIn.map((r, i) => html`<div key=${r.reqId} className="rise bg-card border border-line rounded-2xl px-3.5 py-3 flex items-center gap-3" style=${{ animationDelay: (i * 60) + 'ms' }}>
+            <${Avatar} m=${{ name: r.from.name || '?', color: r.from.color || '#4283F2' }} size=${38}/>
+            <div className="flex-1 min-w-0">
+              <div className="text-[14px] font-semibold truncate">${r.from.name || 'Someone'}</div>
+              <div className="text-[12px] text-muted numtab truncate">${chunkCode(r.from.id)} · wants to chat with you</div>
+            </div>
+            <button onClick=${() => api.acceptReq(r.reqId)} className="shrink-0 rounded-full bg-sage text-paper text-[12.5px] font-semibold px-3.5 py-2 hover:bg-sage-deep active:scale-95 transition">Accept</button>
+            <button onClick=${() => api.declineReq(r.reqId)} aria-label="Decline request" className="shrink-0 rounded-full border border-line text-muted hover:text-rust hover:border-rust/40 text-[12.5px] font-semibold px-3 py-2 transition">Decline</button>
+          </div>`)}
+        </div>
+      </div>`}
+
+      ${reqsOut.length > 0 && html`<div className="mt-5">
+        <div className="flex items-center gap-3 mb-2.5">
+          <span className="text-[11px] font-bold tracking-[.18em] uppercase text-muted">Sent · waiting</span>
+          <span className="h-px flex-1 bg-line"></span>
+        </div>
+        <div className="space-y-1.5">
+          ${reqsOut.map(r => html`<div key=${r.reqId} className="bg-card border border-line rounded-2xl px-3.5 py-2.5 flex items-center gap-3">
+            <${Avatar} m=${{ name: r.to.name || '?', color: r.to.color || '#4283F2' }} size=${30}/>
+            <div className="flex-1 min-w-0 text-[13.5px] truncate">
+              <span className="font-semibold">${r.to.name || r.to.id}</span>
+              <span className="text-muted numtab text-[12px] ml-1.5">${chunkCode(r.to.id)}</span>
+            </div>
+            <span className="inline-flex items-center gap-1.5 text-[10.5px] font-bold tracking-[.12em] uppercase text-muted border border-line rounded-full px-2 py-1 shrink-0"><span className="w-1.5 h-1.5 rounded-full bg-muted live-dot"></span>Pending</span>
+            <button onClick=${() => api.cancelReq(r.reqId)} aria-label="Cancel request" className="p-1.5 rounded-full text-muted hover:text-rust hover:bg-rust-tint transition shrink-0"><${Icon} name="x" size=${14}/></button>
+          </div>`)}
+        </div>
+      </div>`}
+
+      <div className="mt-6">
+        <div className="flex items-center gap-3 mb-2.5">
+          <span className="text-[11px] font-bold tracking-[.18em] uppercase text-muted">Friends · ${rows.length}</span>
+          <span className="h-px flex-1 bg-line"></span>
+        </div>
+        ${rows.length === 0 ? html`<div className="bg-card border border-line rounded-3xl px-4 py-8 flex flex-col items-center text-center gap-2">
+          <span className="w-11 h-11 rounded-full bg-paper border border-line flex items-center justify-center text-muted"><${Icon} name="users" size=${19}/></span>
+          <div className="text-[14px] font-semibold">No friends yet</div>
+          <div className="text-[12.5px] text-muted max-w-[260px] leading-relaxed">Add your first friend with their Splid ID — once they accept, your chat opens up.</div>
+        </div>`
+        : html`<div className="bg-card border border-line rounded-3xl shadow-soft overflow-hidden divide-y divide-line">
+          ${rows.map(({ f, last, unread }) => html`<button key=${f.id} onClick=${() => onOpenThread(f.id)}
+            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-paper/70 transition text-left">
+            <span className="relative shrink-0">
+              <${Avatar} m=${f} size=${40}/>
+              <span className=${'absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-card ' + (api.presence[f.id] ? 'bg-sage' : 'bg-muted/40')}></span>
+            </span>
+            <span className="flex-1 min-w-0">
+              <span className="block text-[14px] font-semibold truncate">${f.name}</span>
+              <span className=${'block text-[12.5px] truncate ' + (unread > 0 ? 'text-ink font-semibold' : 'text-muted')}>
+                ${(api.typing[f.id] || 0) > Date.now() ? 'typing…' : last ? (last.mine ? 'You: ' : '') + last.text : 'Say hi — no messages yet'}
+              </span>
+            </span>
+            <span className="shrink-0 flex flex-col items-end gap-1">
+              <span className="text-[11px] text-muted numtab">${last ? when(last.ts) : ''}</span>
+              ${unread > 0 && html`<span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-rust text-paper text-[10px] font-bold flex items-center justify-center numtab">${unread > 9 ? '9+' : unread}</span>`}
+            </span>
+          </button>`)}
+        </div>`}
+      </div>
+
+    </div>
+  </div>`;
+}
+
+const ADDFRIEND_ERRS = {
+  self: 'That’s your own ID — share it with a friend instead!',
+  already: 'You two are already friends — start chatting!',
+  pending: 'Request already sent — waiting for them to accept.',
+  incoming: 'They already sent you a request — accept it from your requests list.',
+  notfound: 'No Splid ID found for that code — double-check it, or ask them to open Splid Chat once.',
+  offline: 'Couldn’t reach the chat network — check your internet and try again.',
+  bad: 'Enter an ID of 3–14 letters or numbers.',
+};
+
+function AddFriendSheet({ onClose, onSend }) {
+  const [val, setVal] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const clean = normId(val);
+  const submit = async () => {
+    if (busy) return;
+    if (!clean) { setMsg({ kind: 'err', text: ADDFRIEND_ERRS.bad }); return; }
+    setBusy(true); setMsg(null);
+    try {
+      const p = await onSend(clean);
+      setMsg({ kind: 'ok', text: 'Request sent to ' + (p && p.name ? p.name : chunkCode(clean)) + ' — you’ll see them here once they accept.' });
+      setVal('');
+    } catch (e) { setMsg({ kind: 'err', text: ADDFRIEND_ERRS[e] || ADDFRIEND_ERRS.offline }); }
+    setBusy(false);
+  };
+  return html`<${Sheet} title="Add a friend" onClose=${onClose}
+    footer=${html`<div className="shrink-0 border-t border-line px-5 py-3.5 flex gap-2 bg-card">
+      <button onClick=${onClose} className="flex-1 rounded-full border border-line px-4 py-2.5 text-[13.5px] font-semibold hover:border-muted transition">Close</button>
+      <button onClick=${submit} disabled=${busy || !clean} className=${'flex-1 rounded-full px-4 py-2.5 text-[13.5px] font-semibold transition active:scale-95 ' + (!clean || busy ? 'bg-ink/20 text-paper cursor-not-allowed' : 'bg-ink text-paper hover:bg-ink/90')}>${busy ? 'Sending…' : 'Send request'}</button>
+    </div>`}>
+    <div className="space-y-4">
+      <p className="text-[12.5px] text-muted leading-relaxed">Ask a friend for their Splid ID (they’ll find it inside Splid Chat). Paste it below — once they accept your request, you two can talk.</p>
+      <div>
+        <label className="lbl">Friend’s Splid ID</label>
+        <input className="inp font-mono tracking-[.16em] uppercase text-[15px]" placeholder="XXXX-XXXX" spellCheck=${false} maxLength=${18}
+          value=${val} onChange=${e => { setVal(e.target.value); setMsg(null); }}
+          onKeyDown=${e => { if (e.key === 'Enter') submit(); }}/>
+        ${clean && val !== clean && html`<p className="text-[11.5px] text-muted mt-1.5 numtab">Will send to ${chunkCode(clean)}</p>`}
+      </div>
+      ${msg && html`<div className=${'rounded-2xl px-3.5 py-2.5 text-[12.5px] font-semibold leading-relaxed ' + (msg.kind === 'ok' ? 'bg-sage-tint text-sage-deep border border-sage/25' : 'bg-rust-tint text-rust-deep border border-rust/25')}>${msg.text}</div>`}
+    </div>
+  <//>`;
+}
+
+function ChatThread({ peer, chat, api, onBack }) {
+  const msgs = (chat.threads || {})[peer.id] || [];
+  const seen = (chat.seenUpto || {})[peer.id] || 0;
+  const typingNow = (api.typing[peer.id] || 0) > Date.now();
+  const [text, setText] = useState('');
+  const [confirmDel, setConfirmDel] = useState(false);
+  const scRef = useRef(null);
+  const inputRef = useRef(null);
+
+  useEffect(() => { const el = scRef.current; if (el) el.scrollTop = el.scrollHeight; }, [msgs.length, typingNow]);
+  useEffect(() => { api.markRead(peer.id); if (inputRef.current && window.innerWidth > 640) inputRef.current.focus(); }, [peer.id]);
+  useEffect(() => {
+    if (!confirmDel) return;
+    const t = setTimeout(() => setConfirmDel(false), 2600);
+    return () => clearTimeout(t);
+  }, [confirmDel]);
+
+  const send = () => {
+    const t = text.trim(); if (!t) return;
+    setText('');
+    api.sendMsg(peer.id, t);
+    if (inputRef.current) inputRef.current.focus();
+  };
+
+  const groups = [];
+  msgs.forEach(m => {
+    const lab = dayLabel(m.ts);
+    let g = groups[groups.length - 1];
+    if (!g || g.label !== lab) { g = { label: lab, items: [] }; groups.push(g); }
+    g.items.push(m);
+  });
+
+  return html`<div className="flex-1 flex flex-col min-h-0">
+    <div className="shrink-0 border-b border-line bg-paper/90 backdrop-blur-md">
+      <div className="max-w-3xl mx-auto px-3 sm:px-6 h-[60px] flex items-center gap-2.5">
+        <button onClick=${onBack} aria-label="Back to chats" className="p-2 -ml-1 rounded-full text-muted hover:bg-card hover:text-ink transition"><${Icon} name="left" size=${18}/></button>
+        <span className="relative shrink-0">
+          <${Avatar} m=${peer} size=${34}/>
+          <span className=${'absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-paper ' + (api.presence[peer.id] ? 'bg-sage' : 'bg-muted/40')}></span>
+        </span>
+        <div className="flex-1 min-w-0">
+          <div className="text-[14.5px] font-semibold truncate leading-tight">${peer.name}</div>
+          <div className=${'text-[11.5px] font-semibold truncate numtab ' + (typingNow || api.presence[peer.id] ? 'text-sage-deep' : 'text-muted')}>
+            ${typingNow ? 'typing…' : api.presence[peer.id] ? 'online' : chunkCode(peer.id)}
+          </div>
+        </div>
+        <button onClick=${() => { if (confirmDel) { api.unfriend(peer.id); onBack(); } else setConfirmDel(true); }} aria-label="Remove friend"
+          title=${confirmDel ? 'Tap again to remove' : 'Remove friend'}
+          className=${'p-2 rounded-full transition shrink-0 ' + (confirmDel ? 'bg-rust text-paper' : 'text-muted hover:text-rust hover:bg-rust-tint')}>
+          <${Icon} name="trash" size=${15}/>
+        </button>
+      </div>
+    </div>
+
+    <div ref=${scRef} className="flex-1 overflow-y-auto px-3 sm:px-6 py-4">
+      <div className="max-w-3xl mx-auto">
+        ${msgs.length === 0 && html`<div className="flex flex-col items-center justify-center text-center gap-2 pt-16">
+          <span className="w-11 h-11 rounded-full bg-card border border-line flex items-center justify-center text-muted"><${Icon} name="sparkle" size=${19}/></span>
+          <div className="text-[14px] font-semibold">You two are friends now</div>
+          <div className="text-[12.5px] text-muted">Send the first message — say hi!</div>
+        </div>`}
+        ${groups.map(g => html`<div key=${g.label}>
+          <div className="flex justify-center my-3.5"><span className="text-[10.5px] font-bold tracking-[.16em] uppercase text-muted bg-card border border-line rounded-full px-3 py-1">${g.label}</span></div>
+          ${g.items.map(m => html`<div key=${m.id} className="msg-in flex mb-1.5 ${m.mine ? 'justify-end' : 'justify-start'}">
+            <div className=${'max-w-[80%] sm:max-w-[68%] px-3.5 py-2 ' + (m.mine ? 'bg-ink text-paper rounded-2xl rounded-br-md' : 'bg-card border border-line text-ink rounded-2xl rounded-bl-md')}>
+              <div className="text-[14px] leading-snug break-words whitespace-pre-wrap">${m.text}</div>
+              <div className=${'mt-0.5 flex items-center justify-end gap-1 text-[10px] numtab ' + (m.mine ? 'text-paper/45' : 'text-muted')}>
+                <span>${timeLabel(m.ts)}</span>
+                ${m.mine && html`<span className="ml-0.5 inline-flex">${seen >= m.ts
+                  ? html`<${Icon} name="checkCheck" size=${13} sw=${2.4} className="text-[#3DDC5C]"/>`
+                  : html`<${Icon} name="check" size=${11} sw=${2.8} className="opacity-70"/>`}</span>`}
+              </div>
+            </div>
+          </div>`)}
+        </div>`)}
+        ${typingNow && html`<div className="msg-in flex mb-1.5 justify-start">
+          <div className="bg-card border border-line rounded-2xl rounded-bl-md px-3.5 py-2.5 flex items-center gap-1 text-muted">
+            <span className="typ-dot"></span><span className="typ-dot"></span><span className="typ-dot"></span>
+          </div>
+        </div>`}
+      </div>
+    </div>
+
+    <div className="shrink-0 border-t border-line bg-card/95 backdrop-blur-md">
+      <div className="max-w-3xl mx-auto px-3 sm:px-6 py-3 flex items-center gap-2">
+        <input ref=${inputRef} className="inp !rounded-full flex-1" placeholder="Message…" maxLength=${1000} value=${text}
+          onChange=${e => { setText(e.target.value); api.pingTyping(peer.id); }}
+          onKeyDown=${e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}/>
+        <button onClick=${send} disabled=${!text.trim()} aria-label="Send message"
+          className=${'shrink-0 w-10 h-10 rounded-full flex items-center justify-center transition active:scale-90 ' + (text.trim() ? 'bg-ink text-paper hover:bg-ink/90' : 'bg-paper border border-line text-muted')}>
+          <${Icon} name="send" size=${16} sw=${2.2}/>
+        </button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function ChatOverlay({ chat, api, view, setView, onClose }) {
+  const me = chat.me;
+  const [addOpen, setAddOpen] = useState(false);
+
+  useEffect(() => {
+    const h = e => {
+      if (e.key !== 'Escape') return;
+      if (addOpen) setAddOpen(false);
+      else if (view !== 'home') setView('home');
+      else onClose();
+    };
+    window.addEventListener('keydown', h);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { window.removeEventListener('keydown', h); document.body.style.overflow = prev; };
+  }, [addOpen, view]);
+
+  const peer = view !== 'home' ? ((chat.friends || {})[view] || null) : null;
+  const on = api.online;
+
+  return html`<div className="fixed inset-0 z-[70] flex flex-col dotbg">
+    <div className="shrink-0 border-b border-line bg-paper/90 backdrop-blur-md">
+      <div className="max-w-3xl mx-auto px-4 sm:px-6 h-[60px] flex items-center gap-3">
+        ${me
+          ? html`<button onClick=${() => (view === 'home' ? onClose() : setView('home'))} aria-label=${view === 'home' ? 'Close chat' : 'Back to chats'}
+              className="p-2 -ml-1.5 rounded-full text-muted hover:bg-card hover:text-ink transition"><${Icon} name=${view === 'home' ? 'x' : 'left'} size=${18}/></button>`
+          : html`<button onClick=${onClose} aria-label="Close chat"
+              className="p-2 -ml-1.5 rounded-full text-muted hover:bg-card hover:text-ink transition"><${Icon} name="x" size=${18}/></button>`}
+        <span className="inline-flex items-baseline rounded-lg bg-ink pl-2.5 pr-2 py-[7px] shrink-0 shadow-soft" aria-label="Splid Chat">
+          <span className="font-display font-bold tracking-[.14em] text-[12.5px] leading-none text-paper uppercase">CHAT</span>
+          <span className="ml-[2.5px] font-display font-bold text-[15px] leading-none text-[#3DDC5C]">.</span>
+        </span>
+        <span className=${'inline-flex items-center gap-1.5 text-[9.5px] font-bold tracking-[.14em] uppercase rounded-full px-2 py-1 shrink-0 ' + (on ? 'bg-sage-tint text-sage-deep' : 'bg-card border border-line text-muted')}>
+          <span className=${'w-1.5 h-1.5 rounded-full ' + (on ? 'bg-sage live-dot' : 'bg-muted')}></span>${on ? 'Live' : 'Offline'}
+        </span>
+        <div className="flex-1"></div>
+        ${me && view === 'home' && html`<${ChatIdCopy} id=${me.id}/>`}
+      </div>
+    </div>
+
+    ${!me
+      ? html`<${ChatOnboard} onCreate=${api.createIdentity}/>`
+      : peer
+        ? html`<${ChatThread} key=${peer.id} peer=${peer} chat=${chat} api=${api} onBack=${() => setView('home')}/>`
+        : html`<${ChatHome} chat=${chat} api=${api} onOpenThread=${id => setView(id)} onAddFriend=${() => setAddOpen(true)}/>`}
+
+    ${addOpen && me && html`<${AddFriendSheet} onClose=${() => setAddOpen(false)} onSend=${api.sendFriendReq}/>`}
+  </div>`;
+}
+
 /* ---------------- chrome: header & bottom nav ---------------- */
 
-function Header({ group, total, demo, onSettings, onSheet, liveOn }) {
+function Header({ group, total, demo, onSettings, onSheet, liveOn, onChat, chatUnread }) {
   return html`<header className="sticky top-0 z-40 bg-paper/85 backdrop-blur-md border-b border-line">
     <div className="max-w-3xl mx-auto px-4 sm:px-6 h-[60px] flex items-center gap-3">
       <span className="inline-flex items-baseline rounded-lg bg-ink pl-2.5 pr-2 py-[7px] shrink-0 shadow-soft" aria-label="Splid logo">
@@ -1586,6 +2041,11 @@ function Header({ group, total, demo, onSettings, onSheet, liveOn }) {
         <div className="text-[11.5px] text-muted truncate numtab">${group.members.length} member${group.members.length === 1 ? '' : 's'} · ${fmt(total)} spent</div>
       </div>
       <span className="hidden sm:block shrink-0"><${AvStack} members=${group.members} size=${24} max=${4}/></span>
+      <button onClick=${onChat} id="tour-chat" title="Splid Chat — chat with friends by ID" aria-label="Open Splid Chat"
+        className="relative w-8 h-8 shrink-0 rounded-full bg-ink text-paper flex items-center justify-center shadow-soft hover:bg-ink/90 active:scale-95 transition">
+        <${Icon} name="chat" size=${14} sw=${2.2}/>
+        ${chatUnread > 0 && html`<span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-rust text-paper text-[9px] font-bold flex items-center justify-center numtab border-2 border-paper">${chatUnread > 9 ? '9+' : chatUnread}</span>`}
+      </button>
       <button onClick=${onSheet} title="Download this trip as an Excel sheet" aria-label="Download trip sheet"
         className="hidden sm:inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-ink text-paper text-[10px] font-bold tracking-[.16em] shadow-soft hover:bg-ink/90 active:scale-95 transition shrink-0">
         <${Icon} name="sheet" size=${12} sw=${2.4}/><span>SHEET</span>
@@ -1625,7 +2085,7 @@ function App() {
   const [db, setDb] = useState(() => {
     try {
       const raw = localStorage.getItem(KEY);
-      if (raw) { const d = JSON.parse(raw); if (d && d.groups && d.groups.length) { if (!d.deviceId) d.deviceId = uid(); return d; } }
+      if (raw) { const d = JSON.parse(raw); if (d && d.groups && d.groups.length) { if (!d.deviceId) d.deviceId = uid(); if (!d.chat) d.chat = freshChat(); return d; } }
     } catch (e) {}
     return freshDemoDb();
   });
@@ -1704,6 +2164,262 @@ function App() {
 
   const patchGroup = fn => setDb(d => ({ ...d, groups: d.groups.map((g, i) => i === 0 ? fn(g) : g) }));
 
+  /* ---------------- splid chat engine ---------------- */
+
+  const chat = db.chat || freshChat();
+  const patchChat = fn => setDb(d => ({ ...d, chat: fn(d.chat || freshChat()) }));
+  const chatUnread = Object.values((db.chat || {}).unread || {}).reduce((s, n) => s + (n || 0), 0);
+
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatView, setChatView] = useState('home');
+  const [chatOn, setChatOn] = useState(false);
+  const [presence, setPresence] = useState({});
+  const [typing, setTyping] = useState({});
+  const chatClientRef = useRef(null);
+  const chatSubsRef = useRef(new Set());
+  const chatRef = useRef(chat); chatRef.current = chat;
+  const chatOpenRef = useRef(false); chatOpenRef.current = chatOpen;
+  const chatThreadRef = useRef(null); chatThreadRef.current = chatView === 'home' ? null : chatView;
+  const typSentRef = useRef({});
+
+  const chatPublish = (topic, obj, retain) => {
+    const c = chatClientRef.current; if (!c) return false;
+    try { c.publish(topic, obj === null ? '' : JSON.stringify(obj), { qos: 0, retain: !!retain }); return true; } catch (e) { return false; }
+  };
+  const meCard = me => ({ id: me.id, name: me.name, color: me.color });
+
+  const onChatMsg = (topic, payload) => {
+    const me = chatRef.current.me; if (!me) return;
+    const inboxRoot = cTopic('inbox', me.id, '');
+    if (topic.indexOf(inboxRoot) === 0) {
+      let d; try { d = JSON.parse(payload.toString()); } catch (e) { return; }
+      if (!d || d.app !== 'splidchat') return;
+      if (d.type === 'friend-req' && d.from && d.from.id && d.from.id !== me.id && d.reqId) {
+        chatPublish(topic, null, true);
+        if (chatRef.current.reqsIn[d.reqId] || chatRef.current.friends[d.from.id]) {
+          if (chatRef.current.friends[d.from.id]) chatPublish(cTopic('inbox', d.from.id, 'acc', d.reqId), { app:'splidchat', type:'friend-acc', reqId: d.reqId, from: meCard(me), ts: Date.now() }, true);
+          return;
+        }
+        patchChat(c => {
+          const ri = { ...(c.reqsIn || {}) };
+          Object.keys(ri).forEach(k => { if (ri[k].from && ri[k].from.id === d.from.id) delete ri[k]; });
+          ri[d.reqId] = { reqId: d.reqId, from: d.from, ts: d.ts || Date.now() };
+          return { ...c, reqsIn: ri };
+        });
+        showToast((d.from.name || 'Someone') + ' sent you a friend request', 'users');
+      } else if (d.type === 'friend-acc' && d.from && d.from.id && (!d.by || d.by === me.id)) {
+        chatPublish(topic, null, true);
+        const wasPending = !!chatRef.current.reqsOut[d.reqId];
+        patchChat(c => {
+          const ro = { ...(c.reqsOut || {}) }; delete ro[d.reqId];
+          const fr = { ...(c.friends || {}) };
+          if (!fr[d.from.id]) fr[d.from.id] = { id: d.from.id, name: d.from.name || d.from.id, color: d.from.color || AV[d.from.id.length % AV.length], since: Date.now() };
+          return { ...c, reqsOut: ro, friends: fr };
+        });
+        if (wasPending) showToast((d.from.name || 'They') + ' accepted — you can chat now', 'check');
+      } else if (d.type === 'friend-dec' && d.reqId) {
+        chatPublish(topic, null, true);
+        const out = chatRef.current.reqsOut[d.reqId];
+        if (!out) return;
+        patchChat(c => { const ro = { ...(c.reqsOut || {}) }; delete ro[d.reqId]; return { ...c, reqsOut: ro }; });
+        showToast((out.to.name || 'They') + ' declined your request', 'x');
+      } else if (d.type === 'chat-msg' && d.from && d.from.id && d.from.id !== me.id && typeof d.text === 'string') {
+        chatPublish(topic, null, true);
+        const fid = d.from.id;
+        if (!chatRef.current.friends[fid]) return;
+        if ((chatRef.current.threads || {})[fid] && chatRef.current.threads[fid].some(x => x.id === d.id)) return;
+        const openNow = chatOpenRef.current && chatThreadRef.current === fid;
+        patchChat(c => {
+          const th = { ...(c.threads || {}) };
+          th[fid] = [...(th[fid] || []), { id: d.id || uid(), mine: false, text: String(d.text).slice(0, 1000), ts: d.ts || Date.now() }].slice(-300);
+          const un = { ...(c.unread || {}) };
+          if (!openNow) un[fid] = (un[fid] || 0) + 1;
+          const fr = { ...(c.friends || {}) };
+          if (fr[fid] && d.from.name) fr[fid] = { ...fr[fid], name: d.from.name, color: d.from.color || fr[fid].color };
+          return { ...c, threads: th, unread: un, friends: fr };
+        });
+        if (openNow) chatPublish(cTopic('inbox', fid, 'read'), { app:'splidchat', type:'read', by: me.id, upto: d.ts || Date.now() }, false);
+        else showToast('New message from ' + firstName(d.from.name), 'chat');
+      } else if (d.type === 'read' && d.by && chatRef.current.friends[d.by] && d.by !== me.id) {
+        patchChat(c => ({ ...c, seenUpto: { ...(c.seenUpto || {}), [d.by]: Math.max((c.seenUpto || {})[d.by] || 0, d.upto || 0) } }));
+      } else if (d.type === 'typ' && d.from && chatRef.current.friends[d.from] && d.from !== me.id) {
+        setTyping(t => ({ ...t, [d.from]: Date.now() + 3200 }));
+      }
+      return;
+    }
+    if (topic === cTopic('profile', me.id)) {
+      let d; try { d = JSON.parse(payload.toString()); } catch (e) { return; }
+      if (d && d.profile && d.profile.dev && me.dev && d.profile.dev !== me.dev) showToast('This ID is also active on another device', 'users');
+      return;
+    }
+    let m = topic.match(/^splidchat\/v1\/presence\/([A-Z0-9]+)$/);
+    if (m && chatRef.current.friends[m[1]]) {
+      setPresence(p => ({ ...p, [m[1]]: payload.toString().length > 0 }));
+      return;
+    }
+    m = topic.match(/^splidchat\/v1\/profile\/([A-Z0-9]+)$/);
+    if (m && chatRef.current.friends[m[1]] && payload.toString()) {
+      let d; try { d = JSON.parse(payload.toString()); } catch (e) { return; }
+      if (d && d.profile && d.profile.id) patchChat(c => {
+        const fr = { ...(c.friends || {}) }; const f = fr[d.profile.id]; if (!f) return c;
+        fr[d.profile.id] = { ...f, name: d.profile.name || f.name, color: d.profile.color || f.color };
+        return { ...c, friends: fr };
+      });
+    }
+  };
+
+  const connectChat = () => {
+    if (chatClientRef.current || typeof mqtt === 'undefined') return;
+    const me = chatRef.current.me; if (!me) return;
+    let c;
+    try {
+      c = mqtt.connect(MQTT_URL, {
+        clientId: 'splidchat-' + uid(), keepalive: 30, reconnectPeriod: 4000, connectTimeout: 8000, clean: true,
+        will: { topic: cTopic('presence', me.id), payload: '', qos: 0, retain: true },
+      });
+    } catch (e) { return; }
+    chatClientRef.current = c;
+    c.on('connect', () => {
+      setChatOn(true);
+      const me2 = chatRef.current.me; if (!me2) return;
+      chatSubsRef.current.add(cTopic('inbox', me2.id, '#'));
+      chatSubsRef.current.add(cTopic('profile', me2.id));
+      Object.keys(chatRef.current.friends || {}).forEach(f => { chatSubsRef.current.add(cTopic('presence', f)); chatSubsRef.current.add(cTopic('profile', f)); });
+      chatSubsRef.current.forEach(t => { try { c.subscribe(t, { qos: 0 }); } catch (e) {} });
+      chatPublish(cTopic('presence', me2.id), { app:'splidchat', on: 1, t: Date.now() }, true);
+      chatPublish(cTopic('profile', me2.id), { app:'splidchat', type:'profile', profile: { id: me2.id, name: me2.name, color: me2.color, dev: me2.dev }, updatedAt: Date.now() }, true);
+    });
+    c.on('close', () => setChatOn(false));
+    c.on('error', () => {});
+    c.on('message', onChatMsg);
+  };
+
+  useEffect(() => { if (chat.me && !chatClientRef.current) connectChat(); }, [chat.me && chat.me.id]);
+
+  const friendsSig = Object.keys(chat.friends || {}).sort().join(',');
+  useEffect(() => {
+    const c = chatClientRef.current; if (!c) return;
+    friendsSig.split(',').filter(Boolean).forEach(f => {
+      [cTopic('presence', f), cTopic('profile', f)].forEach(t => {
+        if (!chatSubsRef.current.has(t)) { chatSubsRef.current.add(t); try { c.subscribe(t, { qos: 0 }); } catch (e) {} }
+      });
+    });
+  }, [friendsSig, chatOn]);
+
+  useEffect(() => {
+    const iv = setInterval(() => setTyping(t => {
+      const now = Date.now(); let ch = false; const o = {};
+      Object.keys(t).forEach(k => { if (t[k] > now) o[k] = t[k]; else ch = true; });
+      return ch ? o : t;
+    }), 1200);
+    return () => clearInterval(iv);
+  }, []);
+
+  useEffect(() => {
+    const bye = () => {
+      const me = chatRef.current.me; const c = chatClientRef.current;
+      if (me && c) { try { c.publish(cTopic('presence', me.id), '', { qos: 0, retain: true }); } catch (e) {} try { c.end(true); } catch (e) {} }
+    };
+    window.addEventListener('beforeunload', bye);
+    return () => { window.removeEventListener('beforeunload', bye); if (chatClientRef.current) { try { chatClientRef.current.end(true); } catch (e) {} } };
+  }, []);
+
+  /* ---- chat actions ---- */
+  const createIdentity = async ({ name, id, color }) => {
+    const clean = normId(id);
+    if (!name.trim() || clean.length < 3) return { taken: false };
+    const existing = await fetchChatProfile(clean);
+    if (existing) return { taken: true };
+    const me = { id: clean, name: name.trim().slice(0, 24), color: color || AV[hashStr(clean) % AV.length], dev: db.deviceId };
+    patchChat(c => ({ ...(c || freshChat()), me }));
+    showToast('ID created — share ' + chunkCode(clean) + ' with friends', 'sparkle');
+    return { taken: false };
+  };
+
+  const sendFriendReq = async idRaw => {
+    const me = chat.me; const clean = normId(idRaw);
+    if (!me) throw 'offline';
+    if (!clean || clean.length < 3) throw 'bad';
+    if (clean === me.id) throw 'self';
+    if (chat.friends[clean]) throw 'already';
+    if (Object.values(chat.reqsOut || {}).some(r => r.to && r.to.id === clean)) throw 'pending';
+    if (Object.values(chat.reqsIn || {}).some(r => r.from && r.from.id === clean)) throw 'incoming';
+    const p = await fetchChatProfile(clean);
+    if (!p || !p.id) throw 'notfound';
+    const reqId = uid() + Date.now().toString(36);
+    const ok = chatPublish(cTopic('inbox', clean, 'req', reqId), { app:'splidchat', type:'friend-req', reqId, from: meCard(me), ts: Date.now() }, true);
+    if (!ok) throw 'offline';
+    patchChat(c => ({ ...c, reqsOut: { ...(c.reqsOut || {}), [reqId]: { reqId, to: { id: p.id, name: p.name || p.id, color: p.color }, ts: Date.now() } } }));
+    return p;
+  };
+
+  const acceptReq = reqId => {
+    const r = (chat.reqsIn || {})[reqId]; if (!r || !r.from) return;
+    patchChat(c => {
+      const ri = { ...(c.reqsIn || {}) }; delete ri[reqId];
+      const fr = { ...(c.friends || {}) };
+      fr[r.from.id] = { id: r.from.id, name: r.from.name || r.from.id, color: r.from.color || AV[r.from.id.length % AV.length], since: Date.now() };
+      return { ...c, reqsIn: ri, friends: fr };
+    });
+    chatPublish(cTopic('inbox', r.from.id, 'acc', reqId), { app:'splidchat', type:'friend-acc', reqId, from: meCard(chat.me), ts: Date.now() }, true);
+    chatPublish(cTopic('inbox', chat.me.id, 'req', reqId), null, true);
+    showToast((r.from.name || 'They') + ' is now your friend', 'check');
+  };
+
+  const declineReq = reqId => {
+    const r = (chat.reqsIn || {})[reqId]; if (!r) return;
+    patchChat(c => { const ri = { ...(c.reqsIn || {}) }; delete ri[reqId]; return { ...c, reqsIn: ri }; });
+    chatPublish(cTopic('inbox', r.from.id, 'dec', reqId), { app:'splidchat', type:'friend-dec', reqId, from: meCard(chat.me), ts: Date.now() }, true);
+    chatPublish(cTopic('inbox', chat.me.id, 'req', reqId), null, true);
+  };
+
+  const cancelReq = reqId => {
+    const r = (chat.reqsOut || {})[reqId]; if (!r) return;
+    patchChat(c => { const ro = { ...(c.reqsOut || {}) }; delete ro[reqId]; return { ...c, reqsOut: ro }; });
+    chatPublish(cTopic('inbox', r.to.id, 'req', reqId), null, true);
+  };
+
+  const unfriend = fid => {
+    patchChat(c => {
+      const fr = { ...(c.friends || {}) }; delete fr[fid];
+      const th = { ...(c.threads || {}) }; delete th[fid];
+      const un = { ...(c.unread || {}) }; delete un[fid];
+      return { ...c, friends: fr, threads: th, unread: un };
+    });
+    const c = chatClientRef.current;
+    [cTopic('presence', fid), cTopic('profile', fid)].forEach(t => { chatSubsRef.current.delete(t); if (c) { try { c.unsubscribe(t); } catch (e) {} } });
+    showToast('Friend removed', 'trash');
+  };
+
+  const sendMsg = (peerId, text) => {
+    const me = chat.me; const t = String(text || '').trim().slice(0, 1000);
+    if (!me || !t) return;
+    const now = Date.now(), mid = uid();
+    const ok = chatPublish(cTopic('inbox', peerId, 'msg', mid), { app:'splidchat', type:'chat-msg', id: mid, from: meCard(me), text: t, ts: now }, true);
+    patchChat(c => {
+      const th = { ...(c.threads || {}) };
+      th[peerId] = [...(th[peerId] || []), { id: mid, mine: true, text: t, ts: now }].slice(-300);
+      return { ...c, threads: th };
+    });
+    if (!ok) showToast('Chat is offline — message may not deliver', 'x');
+  };
+
+  const markRead = fid => {
+    const arr = (chat.threads || {})[fid] || [];
+    const upto = arr.length ? arr[arr.length - 1].ts : 0;
+    if (((chat.unread || {})[fid] || 0) > 0) patchChat(c => ({ ...c, unread: { ...(c.unread || {}), [fid]: 0 } }));
+    if (upto && chat.me) chatPublish(cTopic('inbox', fid, 'read'), { app:'splidchat', type:'read', by: chat.me.id, upto }, false);
+  };
+
+  const pingTyping = fid => {
+    const now = Date.now();
+    if (typSentRef.current[fid] && now - typSentRef.current[fid] < 2200) return;
+    typSentRef.current[fid] = now;
+    if (chat.me) chatPublish(cTopic('inbox', fid, 'typ'), { app:'splidchat', type:'typ', from: chat.me.id }, false);
+  };
+
+  const chatApi = { online: chatOn, presence, typing, createIdentity, sendFriendReq, acceptReq, declineReq, cancelReq, unfriend, sendMsg, markRead, pingTyping };
+
   const saveExpense = exp => {
     pendingPush.current = true;
     const existed = group.expenses.some(e => e.id === exp.id);
@@ -1745,14 +2461,14 @@ function App() {
   };
   const resetAll = kind => {
     if (kind === 'demo') {
-      setDb(freshDemoDb());
+      setDb(d => ({ ...freshDemoDb(), chat: d.chat }));
       showToast('Demo restored', 'replay');
     } else {
-      setDb({ v: 3, demo: false, tourDone: true, groups: [{
+      setDb(d => ({ v: 3, demo: false, tourDone: true, groups: [{
         id: uid(), name: 'My group', color: '#4283F2',
         members: [{ id: uid(), name: 'You', color: AV[0] }],
         expenses: [], settlements: [],
-      }] });
+      }], chat: d.chat }));
       showToast('Fresh start — add your crew!', 'sparkle');
     }
     setSheet(null); setSelected(null); setTab('balance');
@@ -1822,7 +2538,8 @@ function App() {
 
   return html`<div className="min-h-screen dotbg text-ink font-sans antialiased flex flex-col">
     <${Header} group=${group} total=${total} demo=${db.demo} onSettings=${() => setSheet({ type:'group' })} liveOn=${liveOn}
-      onSheet=${() => downloadTripSheet(group, m => showToast(m, 'check'))}/>
+      onSheet=${() => downloadTripSheet(group, m => showToast(m, 'check'))}
+      onChat=${() => { setChatView('home'); setChatOpen(true); }} chatUnread=${chatUnread}/>
 
     <main className="flex-1">
       ${tab === 'balance'
@@ -1848,6 +2565,8 @@ function App() {
       onShare=${shareTrip} onStopShare=${stopShare} onJoinOpen=${() => setSheet({ type: 'join' })}
       backupName=${db.groups[1] && db.groups[1].name} onRestore=${restoreBackup}
       onReplayTour=${() => { setSheet(null); setTourOpen(true); }}/>`}
+
+    ${chatOpen && html`<${ChatOverlay} chat=${chat} api=${chatApi} view=${chatView} setView=${setChatView} onClose=${() => setChatOpen(false)}/>`}
 
     <${ToastView} toast=${toast}/>
     ${tourOpen && html`<${Tour} steps=${TOUR_STEPS} onFinish=${finishTour} onFinal=${finalTour}/>`}
