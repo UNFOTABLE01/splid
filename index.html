@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#F6F1E8"/>
 <title>Hisaab — who owes whom, at a glance</title>
 
-<script>/* apply saved theme before first paint to avoid a flash */try{var _th=null;try{_th=localStorage.getItem('hisaab.theme')}catch(e){}if(_th!=='dark'&&_th!=='light'){_th=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'}if(_th==='dark')document.documentElement.classList.add('dark')}catch(e){}</script>
+<script>/* the app is light-only — strip any stale dark-mode leftovers before first paint */try{localStorage.removeItem('hisaab.theme')}catch(e){}try{document.documentElement.classList.remove('dark')}catch(e){}</script>
 <script src="https://cdn.tailwindcss.com"></script>
 <script>
 tailwind.config = {
@@ -36,16 +36,13 @@ tailwind.config = {
   *{-webkit-tap-highlight-color:transparent}
   button{touch-action:manipulation}
   html{color-scheme:light}
-  html.dark{color-scheme:dark}
   :root{--c-paper:246 241 232;--c-card:252 249 243;--c-ink:38 34 27;--c-muted:125 116 99;--c-line:230 220 198;--c-rust:225 75 79;--c-rust-deep:185 53 57;--c-rust-tint:253 233 233;--c-sage:43 182 94;--c-sage-deep:29 138 72;--c-sage-tint:223 246 230}
-  html.dark{--c-paper:18 16 13;--c-card:28 25 20;--c-ink:237 231 220;--c-muted:158 148 130;--c-line:58 52 42;--c-rust:236 96 100;--c-rust-deep:245 132 136;--c-rust-tint:56 30 32;--c-sage:59 196 106;--c-sage-deep:102 226 140;--c-sage-tint:21 46 30}
   ::selection{background:rgb(var(--c-ink));color:rgb(var(--c-paper))}
   .dotbg{
     background-color:rgb(var(--c-paper));
     background-image:radial-gradient(rgba(38,34,27,.12) 1.2px,transparent 1.2px);
     background-size:22px 22px;
   }
-  html.dark .dotbg{background-image:radial-gradient(rgba(237,231,220,.09) 1.2px,transparent 1.2px)}
   @keyframes livePulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.8)}}
   .live-dot{animation:livePulse 1.6s ease-in-out infinite}
   .numtab{font-variant-numeric:tabular-nums lining-nums}
@@ -88,14 +85,6 @@ tailwind.config = {
   input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:16px;height:16px;border-radius:50%;background:rgb(var(--c-ink));border:2.5px solid rgb(var(--c-card));box-shadow:0 1px 3px rgba(0,0,0,.35);margin-top:-6.5px}
   input[type=range]::-moz-range-track{height:3px;border-radius:99px;background:rgb(var(--c-line))}
   input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;background:rgb(var(--c-ink));border:2.5px solid rgb(var(--c-card));box-shadow:0 1px 3px rgba(0,0,0,.35)}
-
-  /* dark-mode tuning for the fixed pastel chips used on file bubbles */
-  html.dark .bg-\[\#F3E8FF\]{background-color:#332A45}
-  html.dark .text-\[\#8B5CF6\]{color:#BBA3F9}
-  html.dark .bg-\[\#E3EDFE\]{background-color:#20304A}
-  html.dark .text-\[\#2563C9\]{color:#8FB4F2}
-  html.dark .bg-\[\#FCEFD4\]{background-color:#3D3018}
-  html.dark .text-\[\#B45309\]{color:#E3A25C}
 
   @media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
 </style>
@@ -171,8 +160,6 @@ const ICONS = {
   clip:[P('m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48')],
   download:[P('M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'),P('m7 10 5 5 5-5'),P('M12 15V3')],
   doc:[P('M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2Z'),P('M14 2v6h6'),P('M9 13h6'),P('M9 17h4')],
-  sun:[{t:'c',cx:12,cy:12,r:4},P('M12 2v2'),P('M12 20v2'),P('M4.9 4.9l1.4 1.4'),P('M17.7 17.7l1.4 1.4'),P('M2 12h2'),P('M20 12h2'),P('M4.9 19.1l1.4-1.4'),P('M17.7 6.3l1.4-1.4')],
-  moon:[P('M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11Z')],
 };
 
 function Icon({ name, size=18, sw=2, className='' }) {
@@ -2618,7 +2605,7 @@ function ChatThread({ peer, chat, api, onBack }) {
   </div>`;
 }
 
-function ChatOverlay({ chat, api, view, setView, onClose, theme, onTheme }) {
+function ChatOverlay({ chat, api, view, setView, onClose }) {
   const me = chat.me;
   const [addOpen, setAddOpen] = useState(false);
   const [profOpen, setProfOpen] = useState(false);
@@ -2655,10 +2642,10 @@ function ChatOverlay({ chat, api, view, setView, onClose, theme, onTheme }) {
         <span className=${'inline-flex items-center gap-1.5 text-[9.5px] font-bold tracking-[.14em] uppercase rounded-full px-2 py-1 shrink-0 ' + (on ? 'bg-sage-tint text-sage-deep' : 'bg-card border border-line text-muted')}>
           <span className=${'w-1.5 h-1.5 rounded-full ' + (on ? 'bg-sage live-dot' : 'bg-muted')}></span>${on ? 'Live' : 'Offline'}
         </span>
-        <button onClick=${onTheme} aria-label="Toggle dark mode" title=${theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-          className="w-8 h-8 shrink-0 rounded-full bg-card border border-line text-muted hover:text-ink flex items-center justify-center shadow-soft active:scale-95 transition">
-          <${Icon} name=${theme === 'dark' ? 'sun' : 'moon'} size=${14} sw=${2.2}/>
-        </button>
+        ${me && html`<button onClick=${() => setProfOpen(true)} aria-label="Your profile" title="Your profile"
+          className="shrink-0 rounded-full shadow-soft active:scale-95 transition">
+          <${Avatar} m=${me} size=${32}/>
+        </button>`}
         <div className="flex-1"></div>
         ${me && view === 'home' && html`<${ChatIdCopy} id=${me.id}/>`}
       </div>
@@ -2677,7 +2664,7 @@ function ChatOverlay({ chat, api, view, setView, onClose, theme, onTheme }) {
 
 /* ---------------- chrome: header & bottom nav ---------------- */
 
-function Header({ group, total, demo, onSettings, onSheet, liveOn, onChat, chatUnread, theme, onTheme }) {
+function Header({ group, total, demo, onSettings, onSheet, liveOn, onChat, chatUnread, chatMe }) {
   return html`<header className="sticky top-0 z-40 bg-paper/85 backdrop-blur-md border-b border-line">
     <div className="max-w-3xl mx-auto px-4 sm:px-6 h-[60px] flex items-center gap-3">
       <span className="inline-flex items-baseline rounded-lg bg-ink pl-2.5 pr-2 py-[7px] shrink-0 shadow-soft" aria-label="Splid logo">
@@ -2693,9 +2680,11 @@ function Header({ group, total, demo, onSettings, onSheet, liveOn, onChat, chatU
         <div className="text-[11.5px] text-muted truncate numtab">${group.members.length} member${group.members.length === 1 ? '' : 's'} · ${fmt(total)} spent</div>
       </div>
       <span className="hidden sm:block shrink-0"><${AvStack} members=${group.members} size=${24} max=${4}/></span>
-      <button onClick=${onTheme} aria-label="Toggle dark mode" title=${theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-        className="w-8 h-8 shrink-0 rounded-full bg-card border border-line text-muted hover:text-ink flex items-center justify-center shadow-soft active:scale-95 transition">
-        <${Icon} name=${theme === 'dark' ? 'sun' : 'moon'} size=${14} sw=${2.2}/>
+      <button onClick=${onChat} aria-label="Open Splid Chat" title=${chatMe ? 'Splid Chat — ' + (chatMe.name || chatMe.id) : 'Splid Chat'}
+        className="relative shrink-0 rounded-full active:scale-95 transition">
+        ${chatMe
+          ? html`<${Avatar} m=${chatMe} size=${32}/>`
+          : html`<span className="w-8 h-8 rounded-full bg-card border border-line text-muted flex items-center justify-center shadow-soft"><${Icon} name="userPlus" size=${14} sw=${2.2}/></span>`}
       </button>
       <button onClick=${onChat} id="tour-chat" title="Splid Chat — chat with friends by ID" aria-label="Open Splid Chat"
         className="relative w-8 h-8 shrink-0 rounded-full bg-ink text-paper flex items-center justify-center shadow-soft hover:bg-ink/90 active:scale-95 transition">
@@ -2754,19 +2743,6 @@ function App() {
   const [toast, setToast] = useState(null);
   const toastTimer = useRef(null);
   const [tourOpen, setTourOpen] = useState(!db.tourDone);
-
-  /* dark / light theme — remembers the choice, falls back to the system preference */
-  const [theme, setTheme] = useState(() => {
-    try { const t = localStorage.getItem('hisaab.theme'); if (t === 'dark' || t === 'light') return t; } catch (e) {}
-    try { return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; } catch (e) { return 'light'; }
-  });
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', theme === 'dark');
-    try { localStorage.setItem('hisaab.theme', theme); } catch (e) {}
-    const m = document.querySelector('meta[name="theme-color"]');
-    if (m) m.setAttribute('content', theme === 'dark' ? '#12100D' : '#F6F1E8');
-  }, [theme]);
-  const flipTheme = () => setTheme(t => (t === 'dark' ? 'light' : 'dark'));
 
   const showToast = (msg, icon) => {
     const key = Date.now();
@@ -3664,7 +3640,7 @@ function App() {
   return html`<div className="min-h-screen dotbg text-ink font-sans antialiased flex flex-col">
     <${Header} group=${group} total=${total} demo=${db.demo} onSettings=${() => setSheet({ type:'group' })} liveOn=${liveOn}
       onSheet=${() => downloadTripSheet(group, m => showToast(m, 'check'))}
-      onChat=${() => { setChatView('home'); setChatOpen(true); }} chatUnread=${chatUnread} theme=${theme} onTheme=${flipTheme}/>
+      onChat=${() => { setChatView('home'); setChatOpen(true); }} chatUnread=${chatUnread} chatMe=${chat.me}/>
 
     <main className="flex-1">
       ${tab === 'balance'
@@ -3691,7 +3667,7 @@ function App() {
       backupName=${db.groups[1] && db.groups[1].name} onRestore=${restoreBackup}
       onReplayTour=${() => { setSheet(null); setTourOpen(true); }}/>`}
 
-    ${chatOpen && html`<${ChatOverlay} chat=${chat} api=${chatApi} view=${chatView} setView=${setChatView} onClose=${() => setChatOpen(false)} theme=${theme} onTheme=${flipTheme}/>`}
+    ${chatOpen && html`<${ChatOverlay} chat=${chat} api=${chatApi} view=${chatView} setView=${setChatView} onClose=${() => setChatOpen(false)}/>`}
 
     <${ToastView} toast=${toast}/>
     ${tourOpen && html`<${Tour} steps=${TOUR_STEPS} onFinish=${finishTour} onFinal=${finalTour}/>`}
