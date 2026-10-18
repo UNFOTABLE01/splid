@@ -6,14 +6,15 @@
 <meta name="theme-color" content="#F6F1E8"/>
 <title>Hisaab — who owes whom, at a glance</title>
 
+<script>/* apply saved theme before first paint to avoid a flash */try{var _th=null;try{_th=localStorage.getItem('hisaab.theme')}catch(e){}if(_th!=='dark'&&_th!=='light'){_th=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'}if(_th==='dark')document.documentElement.classList.add('dark')}catch(e){}</script>
 <script src="https://cdn.tailwindcss.com"></script>
 <script>
 tailwind.config = {
   theme: { extend: {
     colors: {
-      paper:'#F6F1E8', card:'#FCF9F3', ink:'#26221B', muted:'#7D7463', line:'#E6DCC6',
-      rust:{DEFAULT:'#E14B4F', deep:'#B93539', tint:'#FDE9E9'},
-      sage:{DEFAULT:'#2BB65E', deep:'#1D8A48', tint:'#DFF6E6'},
+      paper:'rgb(var(--c-paper) / <alpha-value>)', card:'rgb(var(--c-card) / <alpha-value>)', ink:'rgb(var(--c-ink) / <alpha-value>)', muted:'rgb(var(--c-muted) / <alpha-value>)', line:'rgb(var(--c-line) / <alpha-value>)',
+      rust:{DEFAULT:'rgb(var(--c-rust) / <alpha-value>)', deep:'rgb(var(--c-rust-deep) / <alpha-value>)', tint:'rgb(var(--c-rust-tint) / <alpha-value>)'},
+      sage:{DEFAULT:'rgb(var(--c-sage) / <alpha-value>)', deep:'rgb(var(--c-sage-deep) / <alpha-value>)', tint:'rgb(var(--c-sage-tint) / <alpha-value>)'},
     },
     fontFamily: {
       display:['Fraunces','Georgia','serif'],
@@ -35,20 +36,24 @@ tailwind.config = {
   *{-webkit-tap-highlight-color:transparent}
   button{touch-action:manipulation}
   html{color-scheme:light}
-  ::selection{background:#26221B;color:#F6F1E8}
+  html.dark{color-scheme:dark}
+  :root{--c-paper:246 241 232;--c-card:252 249 243;--c-ink:38 34 27;--c-muted:125 116 99;--c-line:230 220 198;--c-rust:225 75 79;--c-rust-deep:185 53 57;--c-rust-tint:253 233 233;--c-sage:43 182 94;--c-sage-deep:29 138 72;--c-sage-tint:223 246 230}
+  html.dark{--c-paper:18 16 13;--c-card:28 25 20;--c-ink:237 231 220;--c-muted:158 148 130;--c-line:58 52 42;--c-rust:236 96 100;--c-rust-deep:245 132 136;--c-rust-tint:56 30 32;--c-sage:59 196 106;--c-sage-deep:102 226 140;--c-sage-tint:21 46 30}
+  ::selection{background:rgb(var(--c-ink));color:rgb(var(--c-paper))}
   .dotbg{
-    background-color:#F6F1E8;
+    background-color:rgb(var(--c-paper));
     background-image:radial-gradient(rgba(38,34,27,.12) 1.2px,transparent 1.2px);
     background-size:22px 22px;
   }
+  html.dark .dotbg{background-image:radial-gradient(rgba(237,231,220,.09) 1.2px,transparent 1.2px)}
   @keyframes livePulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.8)}}
   .live-dot{animation:livePulse 1.6s ease-in-out infinite}
   .numtab{font-variant-numeric:tabular-nums lining-nums}
   .font-display{font-optical-sizing:auto}
-  .lbl{display:block;font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#7D7463;margin-bottom:8px}
-  .inp{width:100%;background:#F6F1E8;border:1px solid #E6DCC6;border-radius:12px;padding:10px 14px;font-size:15px;font-weight:500;outline:none;transition:border-color .2s}
-  .inp:focus{border-color:#26221B}
-  .inp::placeholder{color:#A79D8A}
+  .lbl{display:block;font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:rgb(var(--c-muted));margin-bottom:8px}
+  .inp{width:100%;background:rgb(var(--c-paper));border:1px solid rgb(var(--c-line));border-radius:12px;padding:10px 14px;font-size:15px;font-weight:500;outline:none;transition:border-color .2s}
+  .inp:focus{border-color:rgb(var(--c-ink))}
+  .inp::placeholder{color:rgb(var(--c-muted));opacity:.75}
 
   @keyframes sheetUp{from{transform:translateY(48px) scale(.98);opacity:0}to{transform:none;opacity:1}}
   .sheet-in{animation:sheetUp .36s cubic-bezier(.32,.72,.24,1) both}
@@ -79,10 +84,18 @@ tailwind.config = {
 
   input[type=range]{-webkit-appearance:none;appearance:none;background:transparent;height:20px;cursor:pointer;width:100%}
   input[type=range]:disabled{opacity:.35;cursor:default}
-  input[type=range]::-webkit-slider-runnable-track{height:3px;border-radius:99px;background:#E2D8C2}
-  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:16px;height:16px;border-radius:50%;background:#26221B;border:2.5px solid #FCF9F3;box-shadow:0 1px 3px rgba(38,34,27,.35);margin-top:-6.5px}
-  input[type=range]::-moz-range-track{height:3px;border-radius:99px;background:#E2D8C2}
-  input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;background:#26221B;border:2.5px solid #FCF9F3;box-shadow:0 1px 3px rgba(38,34,27,.35)}
+  input[type=range]::-webkit-slider-runnable-track{height:3px;border-radius:99px;background:rgb(var(--c-line))}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:16px;height:16px;border-radius:50%;background:rgb(var(--c-ink));border:2.5px solid rgb(var(--c-card));box-shadow:0 1px 3px rgba(0,0,0,.35);margin-top:-6.5px}
+  input[type=range]::-moz-range-track{height:3px;border-radius:99px;background:rgb(var(--c-line))}
+  input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;background:rgb(var(--c-ink));border:2.5px solid rgb(var(--c-card));box-shadow:0 1px 3px rgba(0,0,0,.35)}
+
+  /* dark-mode tuning for the fixed pastel chips used on file bubbles */
+  html.dark .bg-\[\#F3E8FF\]{background-color:#332A45}
+  html.dark .text-\[\#8B5CF6\]{color:#BBA3F9}
+  html.dark .bg-\[\#E3EDFE\]{background-color:#20304A}
+  html.dark .text-\[\#2563C9\]{color:#8FB4F2}
+  html.dark .bg-\[\#FCEFD4\]{background-color:#3D3018}
+  html.dark .text-\[\#B45309\]{color:#E3A25C}
 
   @media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
 </style>
@@ -158,6 +171,8 @@ const ICONS = {
   clip:[P('m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48')],
   download:[P('M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'),P('m7 10 5 5 5-5'),P('M12 15V3')],
   doc:[P('M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2Z'),P('M14 2v6h6'),P('M9 13h6'),P('M9 17h4')],
+  sun:[{t:'c',cx:12,cy:12,r:4},P('M12 2v2'),P('M12 20v2'),P('M4.9 4.9l1.4 1.4'),P('M17.7 17.7l1.4 1.4'),P('M2 12h2'),P('M20 12h2'),P('M4.9 19.1l1.4-1.4'),P('M17.7 6.3l1.4-1.4')],
+  moon:[P('M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11Z')],
 };
 
 function Icon({ name, size=18, sw=2, className='' }) {
@@ -422,6 +437,23 @@ const CHAT_ROOT = 'splidchat/v1/';
 const cTopic = (...p) => CHAT_ROOT + p.join('/');
 const normId = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 const newChatId = () => Array.from({ length: 8 }, () => CODE_ABC[Math.floor(Math.random() * CODE_ABC.length)]).join('');
+
+/* suggest an ID grown from the chosen name — "Meera" → MEERA4821, ITSMEE77, MEECHAT2104 … */
+const idFromName = nm => {
+  const base = normId(nm).slice(0, 10);
+  if (base.length < 2) return newChatId();
+  const tail = () => String(10 + Math.floor(Math.random() * 90));
+  const big = () => String(1000 + Math.floor(Math.random() * 9000));
+  const pats = [
+    () => base + big(),
+    () => base + tail(),
+    () => base.slice(0, 6) + tail() + 'X',
+    () => 'ITS' + base.slice(0, 7) + tail(),
+    () => base.slice(0, 4) + 'CHAT' + big(),
+    () => base.slice(0, 5) + big(),
+  ];
+  return pats[Math.floor(Math.random() * pats.length)]().slice(0, 14);
+};
 const freshChat = () => ({ me: null, friends: {}, reqsIn: {}, reqsOut: {}, threads: {}, unread: {}, seenUpto: {} });
 
 /* ---------------- file attachments — any type, up to 200 MB, sent peer-to-peer ----------------
@@ -688,10 +720,10 @@ function Avatar({ m, size = 36, className = '' }) {
   if (m && m.pic) {
     return html`<img src=${m.pic} alt=${(m.name || '?') + '’s avatar'} draggable=${false}
       className=${'rounded-full object-cover select-none shrink-0 bg-paper ' + className}
-      style=${{ width:size, height:size, boxShadow:'0 0 0 2px #FCF9F3' }}/>`;
+      style=${{ width:size, height:size, boxShadow:'0 0 0 2px rgb(var(--c-card))' }}/>`;
   }
   return html`<span className=${'inline-flex items-center justify-center rounded-full font-semibold text-[#FCF9F3] select-none shrink-0 ' + className}
-    style=${{ width:size, height:size, background:m.color, fontSize:Math.round(size * .42), boxShadow:'0 0 0 2px #FCF9F3' }}>
+    style=${{ width:size, height:size, background:m.color, fontSize:Math.round(size * .42), boxShadow:'0 0 0 2px rgb(var(--c-card))' }}>
     ${(m.name || '?').trim()[0].toUpperCase()}
   </span>`;
 }
@@ -1021,7 +1053,7 @@ function SpendChart({ group }) {
                         ${Object.entries(d.byCat).map(([c, v]) => html`<div key=${c}
                           style=${{ flexGrow: v, flexBasis: 0, minHeight: 3, background: CAT_BAR[c] || CAT_BAR.misc }}/>`)}
                       </div>`
-                    : html`<div className="rounded-full" style=${{ height: 5, width: 'min(58%, 24px)', background: '#ECE2CE' }}/>`}
+                    : html`<div className="rounded-full" style=${{ height: 5, width: 'min(58%, 24px)', background: 'rgb(var(--c-line))' }}/>`}
                   ${active && d.total > 0 && html`<div
                     className=${'absolute z-10 pointer-events-none backdrop-in ' +
                       (i < list.length * 0.18 ? 'left-0' : i > list.length * 0.82 ? 'right-0' : 'left-1/2 -translate-x-1/2')}
@@ -1235,7 +1267,7 @@ function BalanceTab({ group, edges, net, simplified, total, selected, setSelecte
   const [mode, setMode] = useState('direct');
   const byId = useMemo(() => Object.fromEntries(group.members.map(m => [m.id, m])), [group.members]);
   return html`<div className="max-w-3xl mx-auto px-4 sm:px-6 pt-5 pb-10">
-    <button onClick=${onMakeOwn} className="group w-full mb-4 flex items-center gap-3.5 rounded-3xl bg-ink text-paper px-4 sm:px-5 py-4 text-left shadow-pop transition hover:bg-[#1d1913] active:scale-[.99]">
+    <button onClick=${onMakeOwn} className="group w-full mb-4 flex items-center gap-3.5 rounded-3xl bg-ink text-paper px-4 sm:px-5 py-4 text-left shadow-pop transition hover:bg-ink/90 active:scale-[.99]">
       <span className="w-10 h-10 rounded-2xl bg-[#3DDC5C]/15 border border-[#3DDC5C]/30 text-[#3DDC5C] flex items-center justify-center shrink-0 transition-transform duration-300 group-hover:rotate-12">
         <${Icon} name="sparkle" size=${18}/>
       </span>
@@ -1867,10 +1899,10 @@ function PicPicker({ pic, color, initial, onPic, size = 72 }) {
     className="relative rounded-full shrink-0 transition active:scale-95 group" style=${{ width:size, height:size }}>
     ${pic
       ? html`<img src=${pic} alt="Profile picture" draggable=${false} className="w-full h-full rounded-full object-cover bg-paper"
-          style=${{ boxShadow:'0 0 0 2px #FCF9F3, 0 10px 28px -12px rgba(38,34,27,.4)' }}/>`
+          style=${{ boxShadow:'0 0 0 2px rgb(var(--c-card)), 0 10px 28px -12px rgba(38,34,27,.4)' }}/>`
       : html`<span className="w-full h-full rounded-full flex items-center justify-center font-semibold text-[#FCF9F3] select-none"
-          style=${{ background:color, fontSize:Math.round(size * .4), boxShadow:'0 0 0 2px #FCF9F3, 0 10px 28px -12px rgba(38,34,27,.4)' }}>${(initial || '?').toUpperCase()}</span>`}
-    <span className=${'absolute -bottom-0.5 -right-0.5 w-7 h-7 rounded-full bg-ink text-paper border-2 border-card flex items-center justify-center transition ' + (busy ? 'opacity-60' : 'group-hover:bg-[#1d1913]')}>
+          style=${{ background:color, fontSize:Math.round(size * .4), boxShadow:'0 0 0 2px rgb(var(--c-card)), 0 10px 28px -12px rgba(38,34,27,.4)' }}>${(initial || '?').toUpperCase()}</span>`}
+    <span className=${'absolute -bottom-0.5 -right-0.5 w-7 h-7 rounded-full bg-ink text-paper border-2 border-card flex items-center justify-center transition ' + (busy ? 'opacity-60' : 'group-hover:bg-ink/90')}>
       <${Icon} name="camera" size=${13} sw=${2.2}/>
     </span>
     <input ref=${fileRef} type="file" accept="image/*" className="hidden" onChange=${pick}/>
@@ -1961,7 +1993,7 @@ function ChatOnboard({ onCreate, onSignIn }) {
         <div className="flex gap-2">
           <input className="inp font-mono font-bold tracking-[.14em] uppercase text-[16px] select-all" placeholder="PICK-ANY-NAME" spellCheck=${false}
             maxLength=${14} value=${idv} onChange=${e => setIdv(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}/>
-          <button onClick=${() => setIdv(newChatId())} title="Randomize ID" aria-label="Randomize ID"
+          <button onClick=${() => setIdv(idFromName(name))} title="Randomize an ID from your name" aria-label="Randomize an ID from your name"
             className="shrink-0 w-11 rounded-xl bg-paper border border-line text-muted hover:text-ink hover:border-muted flex items-center justify-center transition active:scale-95">
             <${Icon} name="dice" size=${17}/>
           </button>
@@ -1970,7 +2002,7 @@ function ChatOnboard({ onCreate, onSignIn }) {
           ${chk === 'checking' && html`<span className="w-1.5 h-1.5 rounded-full bg-sage live-dot"></span><span className="text-muted">Checking if it’s free…</span>`}
           ${chk === 'free' && idOk && html`<span className="w-1.5 h-1.5 rounded-full bg-sage"></span><span className="text-sage-deep">${chunkCode(idv)} is free — grab it!</span>`}
           ${chk === 'taken' && html`<span className="w-1.5 h-1.5 rounded-full bg-rust"></span><span className="text-rust-deep">Already taken — try another</span>`}
-          ${chk === 'idle' && html`<span className="text-muted">3–14 letters & numbers · tap the dice to randomize</span>`}
+          ${chk === 'idle' && html`<span className="text-muted">3–14 letters & numbers · the dice builds an ID from your name</span>`}
         </div>
       </div>
 
@@ -2026,6 +2058,12 @@ function ChatOnboard({ onCreate, onSignIn }) {
 
 function ChatHome({ chat, api, onOpenThread, onAddFriend, onEditProfile }) {
   const me = chat.me;
+  const [confirmOut, setConfirmOut] = useState(false);
+  useEffect(() => {
+    if (!confirmOut) return;
+    const t = setTimeout(() => setConfirmOut(false), 2600);
+    return () => clearTimeout(t);
+  }, [confirmOut]);
   const friends = Object.values(chat.friends || {});
   const reqsIn = Object.values(chat.reqsIn || {}).sort((a, b) => b.ts - a.ts);
   const reqsOut = Object.values(chat.reqsOut || {}).sort((a, b) => b.ts - a.ts);
@@ -2048,9 +2086,13 @@ function ChatHome({ chat, api, onOpenThread, onAddFriend, onEditProfile }) {
           className="shrink-0 w-9 h-9 rounded-full bg-paper border border-line text-muted hover:text-ink hover:border-muted flex items-center justify-center transition active:scale-95">
           <${Icon} name="pencil" size=${14}/>
         </button>
+        <button onClick=${() => { if (confirmOut) api.logout(); else setConfirmOut(true); }} aria-label="Log out" title=${confirmOut ? 'Tap again to log out' : 'Log out on this device'}
+          className=${'shrink-0 w-9 h-9 rounded-full flex items-center justify-center transition active:scale-95 ' + (confirmOut ? 'bg-rust text-paper' : 'bg-paper border border-line text-muted hover:text-rust hover:border-rust/40')}>
+          <${Icon} name="logout" size=${14}/>
+        </button>
       </div>
 
-      <button onClick=${onAddFriend} className="group w-full mt-4 flex items-center gap-3.5 rounded-3xl bg-ink text-paper px-4 sm:px-5 py-4 text-left shadow-pop transition hover:bg-[#1d1913] active:scale-[.99]">
+      <button onClick=${onAddFriend} className="group w-full mt-4 flex items-center gap-3.5 rounded-3xl bg-ink text-paper px-4 sm:px-5 py-4 text-left shadow-pop transition hover:bg-ink/90 active:scale-[.99]">
         <span className="w-10 h-10 rounded-2xl bg-[#3DDC5C]/15 border border-[#3DDC5C]/30 text-[#3DDC5C] flex items-center justify-center shrink-0 transition-transform duration-300 group-hover:rotate-12">
           <${Icon} name="userPlus" size=${18}/>
         </span>
@@ -2177,18 +2219,19 @@ function AddFriendSheet({ onClose, onSend }) {
   <//>`;
 }
 
-function ProfileSheet({ me, onClose, onSave, onLogout }) {
+function ProfileSheet({ me, onClose, onSave, onLogout, onDelete }) {
   const [name, setName] = useState(me.name);
   const [color, setColor] = useState(me.color);
   const [pic, setPic] = useState(me.pic || '');
   const [busy, setBusy] = useState(false);
   const [confirmOut, setConfirmOut] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(false);
 
   useEffect(() => {
-    if (!confirmOut) return;
-    const t = setTimeout(() => setConfirmOut(false), 2600);
+    if (!confirmOut && !confirmDel) return;
+    const t = setTimeout(() => { setConfirmOut(false); setConfirmDel(false); }, 2600);
     return () => clearTimeout(t);
-  }, [confirmOut]);
+  }, [confirmOut, confirmDel]);
 
   const save = async () => {
     if (busy || !name.trim()) return;
@@ -2227,6 +2270,20 @@ function ProfileSheet({ me, onClose, onSave, onLogout }) {
       <div className="bg-paper border border-line rounded-2xl px-3.5 py-3 flex items-center gap-2.5">
         <span className="w-7 h-7 rounded-full bg-ink text-paper flex items-center justify-center shrink-0"><${Icon} name="lock" size=${13} sw=${2.4}/></span>
         <p className="text-[11.5px] text-muted leading-relaxed">Signed in as <span className="font-bold text-ink numtab">${chunkCode(me.id)}</span>. Changes reach your friends instantly. Logging out keeps your account in the cloud — sign back in anywhere with your ID + password.</p>
+      </div>
+
+      <div className="bg-rust-tint/60 border border-rust/25 rounded-2xl px-3.5 py-3">
+        <div className="flex items-start gap-2.5">
+          <span className="w-7 h-7 rounded-full bg-rust text-paper flex items-center justify-center shrink-0"><${Icon} name="trash" size=${13} sw=${2.4}/></span>
+          <div className="flex-1 min-w-0">
+            <div className="text-[12.5px] font-bold text-rust-deep">Delete account</div>
+            <p className="text-[11.5px] text-muted leading-relaxed mt-0.5">Erases your ID for good, removes you from every friend’s list and wipes your cloud data. This cannot be undone.</p>
+          </div>
+        </div>
+        <button onClick=${() => { if (confirmDel) onDelete(); else setConfirmDel(true); }}
+          className=${'mt-2.5 w-full rounded-full py-2 text-[12.5px] font-bold transition active:scale-[.98] ' + (confirmDel ? 'bg-rust text-paper' : 'border border-rust/40 text-rust-deep hover:bg-rust hover:text-paper')}>
+          ${confirmDel ? 'Tap again — delete forever' : 'Delete my account'}
+        </button>
       </div>
     </div>
   <//>`;
@@ -2455,7 +2512,7 @@ function ChatThread({ peer, chat, api, onBack }) {
   </div>`;
 }
 
-function ChatOverlay({ chat, api, view, setView, onClose }) {
+function ChatOverlay({ chat, api, view, setView, onClose, theme, onTheme }) {
   const me = chat.me;
   const [addOpen, setAddOpen] = useState(false);
   const [profOpen, setProfOpen] = useState(false);
@@ -2492,6 +2549,10 @@ function ChatOverlay({ chat, api, view, setView, onClose }) {
         <span className=${'inline-flex items-center gap-1.5 text-[9.5px] font-bold tracking-[.14em] uppercase rounded-full px-2 py-1 shrink-0 ' + (on ? 'bg-sage-tint text-sage-deep' : 'bg-card border border-line text-muted')}>
           <span className=${'w-1.5 h-1.5 rounded-full ' + (on ? 'bg-sage live-dot' : 'bg-muted')}></span>${on ? 'Live' : 'Offline'}
         </span>
+        <button onClick=${onTheme} aria-label="Toggle dark mode" title=${theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          className="w-8 h-8 shrink-0 rounded-full bg-card border border-line text-muted hover:text-ink flex items-center justify-center shadow-soft active:scale-95 transition">
+          <${Icon} name=${theme === 'dark' ? 'sun' : 'moon'} size=${14} sw=${2.2}/>
+        </button>
         <div className="flex-1"></div>
         ${me && view === 'home' && html`<${ChatIdCopy} id=${me.id}/>`}
       </div>
@@ -2504,13 +2565,13 @@ function ChatOverlay({ chat, api, view, setView, onClose }) {
         : html`<${ChatHome} chat=${chat} api=${api} onOpenThread=${id => setView(id)} onAddFriend=${() => setAddOpen(true)} onEditProfile=${() => setProfOpen(true)}/>`}
 
     ${addOpen && me && html`<${AddFriendSheet} onClose=${() => setAddOpen(false)} onSend=${api.sendFriendReq}/>`}
-    ${profOpen && me && html`<${ProfileSheet} me=${me} onClose=${() => setProfOpen(false)} onSave=${p => { api.updateProfile(p); setProfOpen(false); }} onLogout=${() => { setProfOpen(false); api.logout(); }}/>`}
+    ${profOpen && me && html`<${ProfileSheet} me=${me} onClose=${() => setProfOpen(false)} onSave=${p => { api.updateProfile(p); setProfOpen(false); }} onLogout=${() => { setProfOpen(false); api.logout(); }} onDelete=${() => { setProfOpen(false); api.deleteAcc(); }}/>`}
   </div>`;
 }
 
 /* ---------------- chrome: header & bottom nav ---------------- */
 
-function Header({ group, total, demo, onSettings, onSheet, liveOn, onChat, chatUnread }) {
+function Header({ group, total, demo, onSettings, onSheet, liveOn, onChat, chatUnread, theme, onTheme }) {
   return html`<header className="sticky top-0 z-40 bg-paper/85 backdrop-blur-md border-b border-line">
     <div className="max-w-3xl mx-auto px-4 sm:px-6 h-[60px] flex items-center gap-3">
       <span className="inline-flex items-baseline rounded-lg bg-ink pl-2.5 pr-2 py-[7px] shrink-0 shadow-soft" aria-label="Splid logo">
@@ -2526,6 +2587,10 @@ function Header({ group, total, demo, onSettings, onSheet, liveOn, onChat, chatU
         <div className="text-[11.5px] text-muted truncate numtab">${group.members.length} member${group.members.length === 1 ? '' : 's'} · ${fmt(total)} spent</div>
       </div>
       <span className="hidden sm:block shrink-0"><${AvStack} members=${group.members} size=${24} max=${4}/></span>
+      <button onClick=${onTheme} aria-label="Toggle dark mode" title=${theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+        className="w-8 h-8 shrink-0 rounded-full bg-card border border-line text-muted hover:text-ink flex items-center justify-center shadow-soft active:scale-95 transition">
+        <${Icon} name=${theme === 'dark' ? 'sun' : 'moon'} size=${14} sw=${2.2}/>
+      </button>
       <button onClick=${onChat} id="tour-chat" title="Splid Chat — chat with friends by ID" aria-label="Open Splid Chat"
         className="relative w-8 h-8 shrink-0 rounded-full bg-ink text-paper flex items-center justify-center shadow-soft hover:bg-ink/90 active:scale-95 transition">
         <${Icon} name="chat" size=${14} sw=${2.2}/>
@@ -2583,6 +2648,19 @@ function App() {
   const [toast, setToast] = useState(null);
   const toastTimer = useRef(null);
   const [tourOpen, setTourOpen] = useState(!db.tourDone);
+
+  /* dark / light theme — remembers the choice, falls back to the system preference */
+  const [theme, setTheme] = useState(() => {
+    try { const t = localStorage.getItem('hisaab.theme'); if (t === 'dark' || t === 'light') return t; } catch (e) {}
+    try { return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; } catch (e) { return 'light'; }
+  });
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    try { localStorage.setItem('hisaab.theme', theme); } catch (e) {}
+    const m = document.querySelector('meta[name="theme-color"]');
+    if (m) m.setAttribute('content', theme === 'dark' ? '#12100D' : '#F6F1E8');
+  }, [theme]);
+  const flipTheme = () => setTheme(t => (t === 'dark' ? 'light' : 'dark'));
 
   const showToast = (msg, icon) => {
     const key = Date.now();
@@ -2979,6 +3057,18 @@ function App() {
         }
       } else if (d.type === 'read' && d.by && chatRef.current.friends[d.by] && d.by !== me.id) {
         patchChat(c => ({ ...c, seenUpto: { ...(c.seenUpto || {}), [d.by]: Math.max((c.seenUpto || {})[d.by] || 0, d.upto || 0) } }));
+      } else if (d.type === 'friend-del' && d.from && d.from !== me.id) {
+        chatPublish(topic, null, true);
+        if (chatRef.current.friends[d.from]) {
+          patchChat(c => {
+            const fr = { ...(c.friends || {}) }; delete fr[d.from];
+            const th = { ...(c.threads || {}) }; delete th[d.from];
+            const un = { ...(c.unread || {}) }; delete un[d.from];
+            const su = { ...(c.seenUpto || {}) }; delete su[d.from];
+            return { ...c, friends: fr, threads: th, unread: un, seenUpto: su };
+          });
+          showToast('A friend deleted their Splid account', 'trash');
+        }
       } else if (d.type === 'typ' && d.from && chatRef.current.friends[d.from] && d.from !== me.id) {
         setTyping(t => ({ ...t, [d.from]: Date.now() + 3200 }));
       }
@@ -3144,12 +3234,43 @@ function App() {
     return p;
   };
 
+  /* permanently delete the account — wipes the cloud identity & snapshot, clears the inbox, tells friends, then signs out here */
+  const deleteAccount = () => {
+    const me = chatRef.current.me;
+    const c = chatClientRef.current;
+    if (me) {
+      Object.keys(chatRef.current.friends || {}).forEach(fid => {
+        chatPublish(cTopic('inbox', fid, 'del', uid()), { app:'splidchat', type:'friend-del', from: me.id, ts: Date.now() }, true);
+      });
+      Object.values(chatRef.current.reqsOut || {}).forEach(r => { if (r.to && r.to.id) chatPublish(cTopic('inbox', r.to.id, 'req', r.reqId), null, true); });
+      chatPublish(cTopic('profile', me.id), null, true);
+      chatPublish(cTopic('state', me.id), null, true);
+      chatPublish(cTopic('presence', me.id), '', true);
+      try {
+        const w = mqtt.connect(MQTT_URL, { clientId: 'splidx-' + uid(), keepalive: 10, reconnectPeriod: 0, connectTimeout: 6000 });
+        const root = cTopic('inbox', me.id, '');
+        w.on('connect', () => { try { w.subscribe(root + '#', { qos: 0 }); } catch (e) {} });
+        w.on('message', t => { if (t.indexOf(root) === 0) { try { w.publish(t, '', { qos: 0, retain: true }); } catch (e) {} } });
+        setTimeout(() => { try { w.end(true); } catch (e) {} }, 6000);
+      } catch (e) {}
+    }
+    if (c) { setTimeout(() => { try { c.end(true); } catch (e) {} }, 600); } /* small delay so the goodbye publishes flush before the socket closes */
+    chatClientRef.current = null;
+    chatSubsRef.current = new Set();
+    Array.from(new Set([...pcs.current.keys(), ...pullTimers.current.keys()])).forEach(teardownXfer);
+    outFiles.current.clear();
+    setPresence({}); setTyping({}); setChatOn(false); setChatView('home');
+    restoreRef.current = false;
+    patchChat(() => freshChat());
+    showToast('Account deleted — that ID is now free', 'trash');
+  };
+
   /* log out on this device only — the account + its cloud snapshot stay intact for sign-in elsewhere */
   const logoutChat = () => {
     const me = chatRef.current.me;
     const c = chatClientRef.current;
     if (me && c) { try { c.publish(cTopic('presence', me.id), '', { qos: 0, retain: true }); } catch (e) {} }
-    if (c) { try { c.end(true); } catch (e) {} }
+    if (c) { setTimeout(() => { try { c.end(true); } catch (e) {} }, 500); } /* let the presence clear flush */
     chatClientRef.current = null;
     chatSubsRef.current = new Set();
     Array.from(new Set([...pcs.current.keys(), ...pullTimers.current.keys()])).forEach(teardownXfer);
@@ -3249,7 +3370,7 @@ function App() {
     if (chat.me) chatPublish(cTopic('inbox', fid, 'typ'), { app:'splidchat', type:'typ', from: chat.me.id }, false);
   };
 
-  const chatApi = { online: chatOn, presence, typing, xfers, createIdentity, signIn: signInIdentity, logout: logoutChat, updateProfile, sendFriendReq, acceptReq, declineReq, cancelReq, unfriend, sendMsg, markRead, pingTyping, attachFile, startDownload, peekOutFile: mid => outFiles.current.get(mid) || null, loadFile: mid => loadFileBlob(mid) };
+  const chatApi = { online: chatOn, presence, typing, xfers, createIdentity, signIn: signInIdentity, logout: logoutChat, deleteAcc: deleteAccount, updateProfile, sendFriendReq, acceptReq, declineReq, cancelReq, unfriend, sendMsg, markRead, pingTyping, attachFile, startDownload, peekOutFile: mid => outFiles.current.get(mid) || null, loadFile: mid => loadFileBlob(mid) };
 
   const saveExpense = exp => {
     pendingPush.current = true;
@@ -3370,7 +3491,7 @@ function App() {
   return html`<div className="min-h-screen dotbg text-ink font-sans antialiased flex flex-col">
     <${Header} group=${group} total=${total} demo=${db.demo} onSettings=${() => setSheet({ type:'group' })} liveOn=${liveOn}
       onSheet=${() => downloadTripSheet(group, m => showToast(m, 'check'))}
-      onChat=${() => { setChatView('home'); setChatOpen(true); }} chatUnread=${chatUnread}/>
+      onChat=${() => { setChatView('home'); setChatOpen(true); }} chatUnread=${chatUnread} theme=${theme} onTheme=${flipTheme}/>
 
     <main className="flex-1">
       ${tab === 'balance'
@@ -3397,7 +3518,7 @@ function App() {
       backupName=${db.groups[1] && db.groups[1].name} onRestore=${restoreBackup}
       onReplayTour=${() => { setSheet(null); setTourOpen(true); }}/>`}
 
-    ${chatOpen && html`<${ChatOverlay} chat=${chat} api=${chatApi} view=${chatView} setView=${setChatView} onClose=${() => setChatOpen(false)}/>`}
+    ${chatOpen && html`<${ChatOverlay} chat=${chat} api=${chatApi} view=${chatView} setView=${setChatView} onClose=${() => setChatOpen(false)} theme=${theme} onTheme=${flipTheme}/>`}
 
     <${ToastView} toast=${toast}/>
     ${tourOpen && html`<${Tour} steps=${TOUR_STEPS} onFinish=${finishTour} onFinal=${finalTour}/>`}
