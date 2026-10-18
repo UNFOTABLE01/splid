@@ -402,7 +402,8 @@ function downloadTripSheet(group, notify) {
 
 /* ---------------- live sync (share codes · mqtt retained) ---------------- */
 
-const MQTT_URL = 'wss://broker.emqx.io:8084/mqtt';
+/* primary broker is the currently-healthier public one; identity lookups try both, in this order */
+const MQTT_URL = 'wss://broker.hivemq.com:8884/mqtt';
 const TOPIC_ROOT = 'splid/v1/';
 const CODE_ABC = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const chunkCode = c => String(c || '').replace(/(.{4})(?=.)/g, '$1-');
@@ -455,6 +456,31 @@ const idFromName = nm => {
   return pats[Math.floor(Math.random() * pats.length)]().slice(0, 14);
 };
 const freshChat = () => ({ me: null, friends: {}, reqsIn: {}, reqsOut: {}, threads: {}, unread: {}, seenUpto: {} });
+
+/* ---------------- splid vault — the device keyring that makes sign-in instant & offline-proof ----------------
+   Every ID this device has ever created or signed into keeps its password proof (salt + hash) and a full
+   local archive (friends, requests, chats) here — so signing in again NEVER depends on the network. */
+const VAULT_KEY = 'hisaab.chat.vault';
+const vaultAll = () => { try { const v = JSON.parse(localStorage.getItem(VAULT_KEY)); return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; } catch (e) { return {}; } };
+const vaultGet = id => vaultAll()[normId(id)] || null;
+const vaultPut = (id, entry) => {
+  try {
+    const k = normId(id); if (!k) return;
+    const all = vaultAll();
+    all[k] = { ...(all[k] || {}), ...entry, id: k, savedAt: Date.now() };
+    localStorage.setItem(VAULT_KEY, JSON.stringify(all));
+  } catch (e) {}
+};
+const vaultDrop = id => { try { const all = vaultAll(); delete all[normId(id)]; localStorage.setItem(VAULT_KEY, JSON.stringify(all)); } catch (e) {} };
+/* snapshot a chat state for the vault — threads capped so the keyring stays small */
+const vaultPickState = c => {
+  const cap = n => { const th = {}; Object.keys(c.threads || {}).forEach(k => { th[k] = (c.threads[k] || []).slice(-n); }); return th; };
+  const base = { me: c.me, friends: c.friends || {}, reqsIn: c.reqsIn || {}, reqsOut: c.reqsOut || {}, threads: cap(60), unread: c.unread || {}, seenUpto: c.seenUpto || {}, updatedAt: Date.now() };
+  try { if (JSON.stringify(base).length > 700000) base.threads = cap(25); } catch (e) {}
+  try { if (JSON.stringify(base).length > 700000) base.threads = {}; } catch (e) {}
+  return base;
+};
+const vaultArchive = (id, chatState) => { if (id && chatState && chatState.me) vaultPut(id, { archive: { at: Date.now(), state: vaultPickState(chatState) } }); };
 
 /* ---------------- file attachments — any type, up to 200 MB, sent peer-to-peer ----------------
    MQTT (public broker) only carries the tiny metadata offer + WebRTC signaling.
@@ -518,56 +544,101 @@ const loadFileBlob = async k => {
   return memFiles.get(k) || null;
 };
 
-/* one-shot lookup of a retained chat profile — resolves the profile, or null when free / unreachable */
-function fetchChatProfile(id, timeout) {
+/* one retained-message pull with a short "absent" window — the primitive behind every lookup.
+   Resolves { data, connected } so callers can tell "network down" from "truly not there". */
+function pullRetained(topic, match, opts) {
+  opts = opts || {};
   return new Promise(resolve => {
-    if (typeof mqtt === 'undefined') { resolve(null); return; }
+    if (typeof mqtt === 'undefined') { resolve({ data: null, connected: false }); return; }
     let c;
-    try { c = mqtt.connect(MQTT_URL, { clientId: 'splidq-' + uid(), keepalive: 20, reconnectPeriod: 0, connectTimeout: 6000 }); }
-    catch (e) { resolve(null); return; }
-    let done = false, fast = null;
-    const finish = v => { if (done) return; done = true; clearTimeout(to); if (fast) clearTimeout(fast); try { c.end(true); } catch (e) {} resolve(v); };
-    const to = setTimeout(() => finish(null), timeout || 4500);
+    try { c = mqtt.connect(opts.url || MQTT_URL, { clientId: 'splidp-' + uid(), keepalive: 20, reconnectPeriod: 0, connectTimeout: 6000 }); }
+    catch (e) { resolve({ data: null, connected: false }); return; }
+    let done = false, sawConn = false, to = null, fast = null;
+    const finish = v => { if (done) return; done = true; clearTimeout(to); clearTimeout(fast); try { c.end(true); } catch (e) {} resolve(v); };
+    to = setTimeout(() => finish({ data: null, connected: sawConn }), opts.timeout || 5000);
     c.on('connect', () => {
-      try { c.subscribe(cTopic('profile', id), { qos: 0 }); } catch (e) {}
-      fast = setTimeout(() => finish(null), 2400); // retained (or absence) resolves fast after connect
+      sawConn = true;
+      try { c.subscribe(topic, { qos: 0 }); } catch (e) {}
+      fast = setTimeout(() => finish({ data: null, connected: true }), opts.fastMs || 2600); // retained (or absence) resolves fast after connect
     });
     c.on('message', (t, payload) => {
       const s = payload.toString();
-      if (!s) { finish(null); return; }
-      try {
-        const d = JSON.parse(s);
-        if (d && d.app === 'splidchat' && d.profile && d.profile.id === id) finish(d.profile);
-      } catch (e) {}
+      if (!s) { finish({ data: null, connected: true }); return; }
+      try { const d = JSON.parse(s); if (d && match(d)) finish({ data: d, connected: true }); } catch (e) {}
     });
-    c.on('error', () => finish(null));
+    c.on('error', () => finish({ data: null, connected: sawConn }));
+    c.on('close', () => { if (!done && sawConn) finish({ data: null, connected: true }); });
   });
 }
 
-/* one-shot lookup of the retained per-account cloud snapshot (friends, requests, recent chats) — used to restore an account on a new device */
-function fetchChatState(id, timeout) {
+async function fetchChatProfile(id, timeout) {
+  const r = await pullRetained(cTopic('profile', id), d => d.app === 'splidchat' && d.profile && d.profile.id === id, { timeout: timeout || 4500, fastMs: 2400 });
+  return r.data && r.data.profile ? r.data.profile : null;
+}
+
+/* one-shot lookup of the retained per-account cloud snapshot (friends, requests, recent chats) */
+async function fetchChatState(id, timeout) {
+  const r = await pullRetained(cTopic('state', id), d => d.app === 'splidchat' && d.type === 'state' && d.state && d.state.me && d.state.me.id === id, { timeout: timeout || 8000, fastMs: 2400 });
+  return r.data && r.data.state ? r.data.state : null;
+}
+
+const BROKERS = [MQTT_URL, 'wss://broker.emqx.io:8084/mqtt'];
+/* live handshake — when retained lookups come back empty (public brokers sometimes stop serving retained
+   messages), ping splidchat/v1/need/<ID>: any ONLINE device that owns the ID answers with its profile or
+   state over live delivery. Only helps while the owner is online somewhere — but that's the common case
+   (signing in on a laptop while your phone still has the account open). */
+function lookupLive(id, want, timeout) {
   return new Promise(resolve => {
-    if (typeof mqtt === 'undefined') { resolve(null); return; }
+    if (typeof mqtt === 'undefined') { resolve({ data: null, connected: false }); return; }
     let c;
-    try { c = mqtt.connect(MQTT_URL, { clientId: 'splids-' + uid(), keepalive: 20, reconnectPeriod: 0, connectTimeout: 6000 }); }
-    catch (e) { resolve(null); return; }
-    let done = false, fast = null;
-    const finish = v => { if (done) return; done = true; clearTimeout(to); if (fast) clearTimeout(fast); try { c.end(true); } catch (e) {} resolve(v); };
-    const to = setTimeout(() => finish(null), timeout || 8000);
+    try { c = mqtt.connect(MQTT_URL, { clientId: 'splidn-' + uid(), keepalive: 20, reconnectPeriod: 0, connectTimeout: 6000 }); }
+    catch (e) { resolve({ data: null, connected: false }); return; }
+    let done = false, sawConn = false, to = null, rep1 = null, rep2 = null;
+    const finish = v => { if (done) return; done = true; clearTimeout(to); clearTimeout(rep1); clearTimeout(rep2); try { c.end(true); } catch (e) {} resolve(v); };
+    const matchProfile = d => d && d.app === 'splidchat' && d.profile && d.profile.id === id;
+    const matchState = d => d && d.app === 'splidchat' && d.type === 'state' && d.state && d.state.me && d.state.me.id === id;
+    to = setTimeout(() => finish({ data: null, connected: sawConn }), timeout || 4200);
     c.on('connect', () => {
-      try { c.subscribe(cTopic('state', id), { qos: 0 }); } catch (e) {}
-      fast = setTimeout(() => finish(null), 2400);
+      sawConn = true;
+      try { c.subscribe(want === 'state' ? cTopic('state', id) : cTopic('profile', id), { qos: 0 }); } catch (e) {}
+      const ping = () => { try { c.publish(cTopic('need', id), JSON.stringify({ app: 'splidchat', type: 'need', want, id, t: Date.now() }), { qos: 0 }); } catch (e) {} };
+      ping(); rep1 = setTimeout(ping, 900); rep2 = setTimeout(ping, 2000);
     });
     c.on('message', (t, payload) => {
-      const s = payload.toString();
-      if (!s) { finish(null); return; }
-      try {
-        const d = JSON.parse(s);
-        if (d && d.app === 'splidchat' && d.type === 'state' && d.state && d.state.me && d.state.me.id === id) finish(d.state);
-      } catch (e) {}
+      const s = payload.toString(); if (!s) return;
+      try { const d = JSON.parse(s); if ((want === 'state' && matchState(d)) || (want !== 'state' && matchProfile(d))) finish({ data: d, connected: true }); } catch (e) {}
     });
-    c.on('error', () => finish(null));
+    c.on('error', () => finish({ data: null, connected: sawConn }));
   });
+}
+/* sign-in identity chase — device vault is checked before this; here we chase the ID across two brokers and
+   both retained topics, then a live handshake, before ever saying "not found". Offline stays distinguishable. */
+async function lookupIdentity(id, onStep) {
+  const tries = [
+    { kind: 'profile', url: BROKERS[0] },
+    { kind: 'profile', url: BROKERS[1] },
+    { kind: 'state', url: BROKERS[0] },
+    { kind: 'state', url: BROKERS[1] },
+    { kind: 'live', want: 'profile' },
+    { kind: 'live', want: 'state' },
+  ];
+  let connected = false, src = null, srcKind = null;
+  for (let i = 0; i < tries.length && !src; i++) {
+    const t = tries[i];
+    if (onStep) { try { onStep(t.kind === 'live' ? 'live' : (t.kind === 'profile' ? 'lookup' : 'cloud')); } catch (e) {} }
+    let r;
+    if (t.kind === 'live') r = await lookupLive(id, t.want, 4200);
+    else r = await pullRetained(
+      cTopic(t.kind, id),
+      t.kind === 'profile'
+        ? d => d.app === 'splidchat' && d.profile && d.profile.id === id
+        : d => d.app === 'splidchat' && d.type === 'state' && d.state && d.state.me && d.state.me.id === id,
+      { url: t.url, timeout: i === 0 ? 6000 : 4600, fastMs: i === 0 ? 2600 : 2200 }
+    );
+    if (r.connected) connected = true;
+    if (r.data) { src = t.kind === 'state' || (t.kind === 'live' && t.want === 'state') ? r.data.state : r.data.profile; srcKind = t.kind === 'live' && t.want === 'state' ? 'state' : t.kind; }
+  }
+  return { src, srcKind, connected };
 }
 
 /* ---------------- password hashing & profile pictures ---------------- */
@@ -1873,13 +1944,14 @@ function ChatIdCopy({ id, big }) {
 }
 
 const SIGNIN_ERRS = {
-  notfound: 'No Splid ID matches that code — check the spelling.',
+  notfound: 'We couldn’t find that ID on the chat network right now. Check the spelling — if the ID was created on another device, the network may be slow to sync, so try again in a moment.',
   nopass: 'This ID was made before passwords existed, so it can’t be verified on a new device.',
   wrongpass: 'Wrong password for that ID — try again.',
   bad: 'Enter your ID (3–14 letters or numbers) and your password.',
   offline: 'Couldn’t reach the chat network — check your internet and try again.',
   try: 'Sign-in failed — check your connection and try again.',
 };
+const SIGNIN_STEPS = { lookup: 'Searching the network for your ID…', cloud: 'Checking the cloud snapshot…', live: 'Asking online devices for your ID…', verify: 'Checking your password…', restore: 'Restoring your friends & chats…' };
 
 /* circular profile-picture picker: tap → file input → compressed JPEG preview */
 function PicPicker({ pic, color, initial, onPic, size = 72 }) {
@@ -1923,6 +1995,9 @@ function ChatOnboard({ onCreate, onSignIn }) {
   const [chk, setChk] = useState('idle');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+  const [busyStep, setBusyStep] = useState(null);
+  /* IDs this device already knows — one tap prefills the sign-in form */
+  const [known] = useState(() => Object.values(vaultAll()).filter(e => e && e.id && e.salt && e.hash).sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0)).slice(0, 4));
 
   const idOk = idv.length >= 3 && idv.length <= 14;
   const passOk = pass.length >= 4;
@@ -1933,34 +2008,47 @@ function ChatOnboard({ onCreate, onSignIn }) {
     let live = true;
     setChk('checking');
     const t = setTimeout(async () => {
+      const v0 = vaultGet(idv);            /* the device remembers — no network needed to know it's taken */
+      if (v0 && v0.salt && v0.hash) { if (live) setChk('yours'); return; }
       const p = await fetchChatProfile(idv);
       if (live) setChk(p ? 'taken' : 'free');
     }, 600);
     return () => { live = false; clearTimeout(t); };
   }, [idv, tab]);
 
-  const canCreate = name.trim().length >= 1 && idOk && chk !== 'checking' && chk !== 'taken' && passOk && passMatch && !busy;
+  const canCreate = name.trim().length >= 1 && idOk && chk !== 'checking' && chk !== 'taken' && chk !== 'yours' && passOk && passMatch && !busy;
 
   const create = async () => {
     if (!canCreate) return;
     setBusy(true); setErr(null);
     const res = await onCreate({ name, id: idv, color, pic, password: pass });
     if (res && res.taken) setChk('taken');
+    if (res && res.takenLocal) {   /* this device already holds that ID — send them to sign in instead */
+      setTab('signin'); setInId(idv); setPass(''); setPass2('');
+      setErr('You already made ' + chunkCode(normId(idv)) + ' on this device — type its password to sign in.');
+    }
     setBusy(false);
   };
 
   const cleanIn = normId(inId);
+  const knownMatch = cleanIn ? vaultGet(cleanIn) : null;
   const canSign = cleanIn.length >= 3 && inPass.length >= 1 && !busy;
   const signIn = async () => {
     if (!canSign) return;
-    setBusy(true); setErr(null);
-    try { await onSignIn({ id: cleanIn, password: inPass }); }
+    setBusy(true); setErr(null); setBusyStep(null);
+    try { await onSignIn({ id: cleanIn, password: inPass, onStep: setBusyStep }); }
     catch (e) { setErr(SIGNIN_ERRS[e] || SIGNIN_ERRS.try); }
-    setBusy(false);
+    setBusyStep(null); setBusy(false);
   };
 
-  const passField = (val, set, ph, ac, onEnter) => html`<div className="relative">
-    <input type=${showPass ? 'text' : 'password'} className="inp pr-11" placeholder=${ph} autoComplete=${ac}
+  const pickKnown = k => {
+    setInId(k.id); setErr(null);
+    const el = document.getElementById('signin-pass');
+    if (el) el.focus();
+  };
+
+  const passField = (val, set, ph, ac, onEnter, inpId) => html`<div className="relative">
+    <input type=${showPass ? 'text' : 'password'} className="inp pr-11" placeholder=${ph} autoComplete=${ac} id=${inpId}
       maxLength=${40} value=${val} onChange=${e => { set(e.target.value); setErr(null); }}
       onKeyDown=${e => { if (e.key === 'Enter' && onEnter) onEnter(); }}/>
     <button type="button" onClick=${() => setShowPass(s => !s)} aria-label=${showPass ? 'Hide password' : 'Show password'}
@@ -2002,6 +2090,8 @@ function ChatOnboard({ onCreate, onSignIn }) {
           ${chk === 'checking' && html`<span className="w-1.5 h-1.5 rounded-full bg-sage live-dot"></span><span className="text-muted">Checking if it’s free…</span>`}
           ${chk === 'free' && idOk && html`<span className="w-1.5 h-1.5 rounded-full bg-sage"></span><span className="text-sage-deep">${chunkCode(idv)} is free — grab it!</span>`}
           ${chk === 'taken' && html`<span className="w-1.5 h-1.5 rounded-full bg-rust"></span><span className="text-rust-deep">Already taken — try another</span>`}
+          ${chk === 'yours' && html`<span className="w-1.5 h-1.5 rounded-full bg-sage"></span><span className="text-sage-deep">That one’s yours — it’s saved on this device.</span>
+            <button onClick=${() => { setTab('signin'); setInId(idv); setErr(null); }} className="underline underline-offset-2 text-ink hover:text-ink/80 transition">Sign in instead</button>`}
           ${chk === 'idle' && html`<span className="text-muted">3–14 letters & numbers · the dice builds an ID from your name</span>`}
         </div>
       </div>
@@ -2037,18 +2127,34 @@ function ChatOnboard({ onCreate, onSignIn }) {
         <input className="inp font-mono font-bold tracking-[.14em] uppercase text-[16px]" placeholder="YOUR-ID" spellCheck=${false}
           maxLength=${14} value=${inId} onChange=${e => { setInId(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '')); setErr(null); }}/>
         ${cleanIn && html`<p className="text-[11.5px] text-muted mt-1.5 numtab">Signing in as ${chunkCode(cleanIn)}</p>`}
+        ${knownMatch && knownMatch.salt && html`<p className="mt-2 text-[11.5px] font-semibold text-sage-deep flex items-center gap-1.5">
+          <${Icon} name="check" size=${12} sw=${2.6}/>Saved on this device — sign-in is instant, even offline</p>`}
       </div>
       <div className="mt-4">
         <label className="lbl"><span className="inline-flex items-center gap-1.5"><${Icon} name="lock" size=${12} sw=${2.4}/>Password</span></label>
-        ${passField(inPass, setInPass, 'Your password', 'current-password', signIn)}
+        ${passField(inPass, setInPass, 'Your password', 'current-password', signIn, 'signin-pass')}
       </div>
+      ${!inId && known.length > 0 && html`<div className="mt-4">
+        <div className="text-[10.5px] font-bold tracking-[.16em] uppercase text-muted mb-2">On this device</div>
+        <div className="flex flex-wrap gap-2">
+          ${known.map(k => html`<button key=${k.id} type="button" onClick=${() => pickKnown(k)}
+            title=${'Sign in as ' + (k.name || k.id)}
+            className="flex items-center gap-2 rounded-full bg-paper border border-line pl-1 pr-3 py-1 hover:border-muted transition active:scale-95">
+            <span className="w-7 h-7 rounded-full text-[#FCF9F3] text-[12px] font-semibold flex items-center justify-center shrink-0" style=${{ background: k.color || '#26221B' }}>${(k.name || k.id)[0].toUpperCase()}</span>
+            <span className="text-left leading-tight">
+              <span className="block text-[12px] font-semibold text-ink max-w-[110px] truncate">${k.name || k.id}</span>
+              <span className="block text-[10px] font-mono font-bold tracking-[.1em] text-muted numtab">${chunkCode(k.id)}</span>
+            </span>
+          </button>`)}
+        </div>
+      </div>`}
       ${err && html`<div className="mt-4 rounded-2xl px-3.5 py-2.5 text-[12.5px] font-semibold leading-relaxed bg-rust-tint text-rust-deep border border-rust/25">${err}</div>`}
       <button onClick=${signIn} disabled=${!canSign}
         className=${'mt-6 w-full rounded-full py-3 text-[14px] font-semibold transition active:scale-[.98] ' +
           (canSign ? 'bg-ink text-paper hover:bg-ink/90' : 'bg-ink/20 text-paper cursor-not-allowed')}>
-        ${busy ? 'Verifying…' : 'Verify & sign in'}
+        ${busy ? (SIGNIN_STEPS[busyStep] || 'Verifying…') : (knownMatch && knownMatch.salt ? 'Verify & sign in — it’s instant' : 'Verify & sign in')}
       </button>
-      <p className="text-[11px] text-muted mt-3 text-center leading-relaxed">Your ID and password are checked over the live network — then this device picks up right where you left off.</p>
+      <p className="text-[11px] text-muted mt-3 text-center leading-relaxed">Saved IDs are verified right on this device — instantly, even offline. A new device verifies over the live network, then picks up right where you left off.</p>
       <button onClick=${() => { setTab('create'); setErr(null); }} className="mt-2 w-full text-center text-[12.5px] font-semibold text-muted hover:text-ink transition py-1">
         New here? <span className="text-ink underline underline-offset-2">Create an ID</span>
       </button>`}
@@ -2964,6 +3070,14 @@ function App() {
 
   const onChatMsg = (topic, payload) => {
     const me = chatRef.current.me; if (!me) return;
+    /* live handshake — another device is looking for MY id and the broker lost the retained copies: answer now */
+    if (topic === cTopic('need', me.id)) {
+      let d; try { d = JSON.parse(payload.toString()); } catch (e) { return; }
+      if (!d || d.app !== 'splidchat' || d.type !== 'need' || normId(d.id) !== me.id) return;
+      if (d.want === 'state') chatPublish(cTopic('state', me.id), { app:'splidchat', type:'state', v:1, state: vaultPickState(chatRef.current) }, false);
+      else chatPublish(cTopic('profile', me.id), { app:'splidchat', type:'profile', profile: { id: me.id, name: me.name, color: me.color, pic: me.pic || '', dev: me.dev, salt: me.salt, hash: me.hash }, updatedAt: Date.now() }, false);
+      return;
+    }
     const inboxRoot = cTopic('inbox', me.id, '');
     if (topic.indexOf(inboxRoot) === 0) {
       let d; try { d = JSON.parse(payload.toString()); } catch (e) { return; }
@@ -3116,6 +3230,7 @@ function App() {
       setChatOn(true);
       const me2 = chatRef.current.me; if (!me2) return;
       chatSubsRef.current.add(cTopic('inbox', me2.id, '#'));
+      chatSubsRef.current.add(cTopic('need', me2.id)); /* live handshake listener — answers identity pings */
       chatSubsRef.current.add(cTopic('profile', me2.id));
       Object.keys(chatRef.current.friends || {}).forEach(f => { chatSubsRef.current.add(cTopic('presence', f)); chatSubsRef.current.add(cTopic('profile', f)); });
       chatSubsRef.current.forEach(t => { try { c.subscribe(t, { qos: 0 }); } catch (e) {} });
@@ -3165,13 +3280,14 @@ function App() {
       const me = chatRef.current.me;
       if (!me || restoreRef.current) return;
       const base = {
-        me: { id: me.id, name: me.name, color: me.color, pic: me.pic || '' },
+        me: { id: me.id, name: me.name, color: me.color, pic: me.pic || '', salt: me.salt, hash: me.hash },
         friends: chatRef.current.friends || {},
         reqsIn: chatRef.current.reqsIn || {},
         reqsOut: chatRef.current.reqsOut || {},
         unread: chatRef.current.unread || {},
         seenUpto: chatRef.current.seenUpto || {},
       };
+      vaultPut(me.id, { salt: me.salt, hash: me.hash, name: me.name, color: me.color, pic: me.pic || '' }); /* keyring stays current even if the cloud drops it */
       const build = threads => ({ app:'splidchat', type:'state', v:1, state: { ...base, threads }, updatedAt: Date.now() });
       let th = {};
       Object.keys(chatRef.current.threads || {}).forEach(k => { th[k] = (chatRef.current.threads[k] || []).slice(-60); });
@@ -3191,35 +3307,85 @@ function App() {
     if (pw.length < 4) return { taken: false, weak: true };
     const existing = await fetchChatProfile(clean);
     if (existing) return { taken: true };
+    const v0 = vaultGet(clean);
+    if (v0 && v0.salt && v0.hash) return { taken: false, takenLocal: true }; /* this device already owns that ID */
     const salt = uid() + uid();
     const hash = await pwHash(salt, pw);
     const me = { id: clean, name: name.trim().slice(0, 24), color: color || AV[hashStr(clean) % AV.length], pic: pic || '', dev: db.deviceId, salt, hash };
+    vaultPut(clean, { salt, hash, name: me.name, color: me.color, pic: me.pic || '' });
     restoreRef.current = false;
     patchChat(c => ({ ...(c || freshChat()), me }));
     showToast('ID created — share ' + chunkCode(clean) + ' with friends', 'sparkle');
     return { taken: false };
   };
 
-  /* verify ID + password over the network, then pull the cloud snapshot onto this device */
-  const signInIdentity = async ({ id, password }) => {
+  /* verify ID + password — the device vault first (instant, works offline), the network only for IDs this device has never seen — then restore everything */
+  const signInIdentity = async ({ id, password, onStep }) => {
     const clean = normId(id);
     const pw = String(password || '');
     if (!clean || clean.length < 3 || !pw) throw 'bad';
-    const p = await fetchChatProfile(clean);
-    if (!p || !p.id) throw 'notfound';
-    if (!p.salt || !p.hash) throw 'nopass';
-    const h = await pwHash(p.salt, pw);
-    if (h !== p.hash) throw 'wrongpass';
-    restoreRef.current = true;
-    const st = await fetchChatState(clean);
+    const step = k => { if (onStep) { try { onStep(k); } catch (e) {} } };
+
+    /* ---- 1) the device vault: this device has seen this ID before → verify locally, no network needed ---- */
+    const v = vaultGet(clean);
+    if (v && v.salt && v.hash) {
+      const hv = await pwHash(v.salt, pw);
+      if (hv !== v.hash) throw 'wrongpass';
+      step('restore');
+      const a = v.archive && v.archive.state && v.archive.state.me && v.archive.state.me.id === clean ? v.archive.state : null;
+      const me = {
+        id: clean,
+        name: (a && a.me && a.me.name) || v.name || clean,
+        color: (a && a.me && a.me.color) || v.color || AV[hashStr(clean) % AV.length],
+        pic: (a && a.me && a.me.pic) || v.pic || '',
+        dev: db.deviceId, salt: v.salt, hash: v.hash,
+      };
+      restoreRef.current = true;
+      patchChat(() => ({
+        me,
+        friends: (a && a.friends) || {},
+        reqsIn: (a && a.reqsIn) || {},
+        reqsOut: (a && a.reqsOut) || {},
+        threads: (a && a.threads) || {},
+        unread: (a && a.unread) || {},
+        seenUpto: (a && a.seenUpto) || {},
+      }));
+      setTimeout(() => { restoreRef.current = false; }, 2500);
+      /* quietly check the cloud for anything newer than the local archive (activity from another device) — union-merge, local wins */
+      fetchChatState(clean, 9000).then(st => {
+        if (!st || !st.me || st.me.id !== clean) return;
+        vaultArchive(clean, st);
+        if (v.archive && (st.updatedAt || 0) <= (v.archive.at || 0)) return;
+        patchChat(c => {
+          const pick = (cur, cloud) => { const o = { ...(cur || {}) }; Object.keys(cloud || {}).forEach(k => { if (!(k in o)) o[k] = cloud[k]; }); return o; };
+          return { ...c, friends: pick(c.friends, st.friends), reqsIn: pick(c.reqsIn, st.reqsIn), reqsOut: pick(c.reqsOut, st.reqsOut), threads: pick(c.threads, st.threads), unread: pick(c.unread, st.unread), seenUpto: pick(c.seenUpto, st.seenUpto) };
+        });
+        showToast('Synced the newest chats from the cloud', 'check');
+      }).catch(() => {});
+      showToast('Welcome back, ' + firstName(me.name) + ' — verified on this device', 'sparkle');
+      return { id: clean };
+    }
+
+    /* ---- 2) the network: first sign-in on this device — chase the ID across brokers & both retained topics ---- */
+    step('lookup');
+    const { src, srcKind, connected } = await lookupIdentity(clean, onStep);
+    if (!connected) throw 'offline';          /* never reached any broker — don't claim the ID doesn't exist */
+    if (!src || !src.id) throw 'notfound';    /* reached the network, nothing retained anywhere */
+    if (!src.salt || !src.hash) throw 'nopass';
+    step('verify');
+    const h = await pwHash(src.salt, pw);
+    if (h !== src.hash) throw 'wrongpass';
+    step('restore');
+    const st = srcKind === 'state' ? src : await fetchChatState(clean);
     const base = st && st.me && st.me.id === clean ? st : null;
     const me = {
       id: clean,
-      name: (base && base.me && base.me.name) || p.name || clean,
-      color: (base && base.me && base.me.color) || p.color || AV[hashStr(clean) % AV.length],
-      pic: p.pic || (base && base.me && base.me.pic) || '',
-      dev: db.deviceId, salt: p.salt, hash: p.hash,
+      name: (base && base.me && base.me.name) || src.name || clean,
+      color: (base && base.me && base.me.color) || src.color || AV[hashStr(clean) % AV.length],
+      pic: src.pic || (base && base.me && base.me.pic) || '',
+      dev: db.deviceId, salt: src.salt, hash: src.hash,
     };
+    restoreRef.current = true;
     patchChat(() => ({
       me,
       friends: (base && base.friends) || {},
@@ -3229,9 +3395,12 @@ function App() {
       unread: (base && base.unread) || {},
       seenUpto: (base && base.seenUpto) || {},
     }));
+    const entry = { salt: src.salt, hash: src.hash, name: me.name, color: me.color, pic: me.pic }; /* remember it here — next sign-in is instant */
+    if (base) entry.archive = { at: Date.now(), state: vaultPickState(base) };
+    vaultPut(clean, entry);
     setTimeout(() => { restoreRef.current = false; }, 4000);
     showToast('Welcome back, ' + firstName(me.name), 'sparkle');
-    return p;
+    return { id: clean };
   };
 
   /* permanently delete the account — wipes the cloud identity & snapshot, clears the inbox, tells friends, then signs out here */
@@ -3246,6 +3415,7 @@ function App() {
       chatPublish(cTopic('profile', me.id), null, true);
       chatPublish(cTopic('state', me.id), null, true);
       chatPublish(cTopic('presence', me.id), '', true);
+      vaultDrop(me.id); /* the keyring forgets this ID too */
       try {
         const w = mqtt.connect(MQTT_URL, { clientId: 'splidx-' + uid(), keepalive: 10, reconnectPeriod: 0, connectTimeout: 6000 });
         const root = cTopic('inbox', me.id, '');
@@ -3265,10 +3435,11 @@ function App() {
     showToast('Account deleted — that ID is now free', 'trash');
   };
 
-  /* log out on this device only — the account + its cloud snapshot stay intact for sign-in elsewhere */
+  /* log out on this device only — the account is archived in the device vault (and in the cloud) for sign-in elsewhere or right back here */
   const logoutChat = () => {
     const me = chatRef.current.me;
     const c = chatClientRef.current;
+    if (me) vaultArchive(me.id, chatRef.current); /* save everything BEFORE wiping — next sign-in here restores it instantly, even offline */
     if (me && c) { try { c.publish(cTopic('presence', me.id), '', { qos: 0, retain: true }); } catch (e) {} }
     if (c) { setTimeout(() => { try { c.end(true); } catch (e) {} }, 500); } /* let the presence clear flush */
     chatClientRef.current = null;
@@ -3277,13 +3448,14 @@ function App() {
     setPresence({}); setTyping({}); setChatOn(false); setChatView('home');
     restoreRef.current = false;
     patchChat(() => freshChat());
-    showToast('Logged out — sign back in with your ID + password', 'logout');
+    showToast('Logged out — your account is saved; sign back in with your ID + password', 'logout');
   };
 
   const updateProfile = async ({ name, color, pic }) => {
     const me = chatRef.current.me; if (!me) return;
     const next = { ...me, name: (name || '').trim().slice(0, 24) || me.name, color: color || me.color, pic: pic || '' };
     patchChat(c => ({ ...c, me: next }));
+    vaultPut(me.id, { salt: me.salt, hash: me.hash, name: next.name, color: next.color, pic: next.pic });
     chatPublish(cTopic('profile', me.id), { app:'splidchat', type:'profile', profile: { id: me.id, name: next.name, color: next.color, pic: next.pic, dev: me.dev, salt: me.salt, hash: me.hash }, updatedAt: Date.now() }, true);
     showToast('Profile updated', 'check');
   };
@@ -3296,7 +3468,8 @@ function App() {
     if (chat.friends[clean]) throw 'already';
     if (Object.values(chat.reqsOut || {}).some(r => r.to && r.to.id === clean)) throw 'pending';
     if (Object.values(chat.reqsIn || {}).some(r => r.from && r.from.id === clean)) throw 'incoming';
-    const p = await fetchChatProfile(clean);
+    let p = await fetchChatProfile(clean).catch(() => null);
+    if (!p) { try { const r = await lookupLive(clean, 'profile', 4200); if (r.data && r.data.profile) p = r.data.profile; } catch (e) {} } /* retained lost → ask live */
     if (!p || !p.id) throw 'notfound';
     const reqId = uid() + Date.now().toString(36);
     const ok = chatPublish(cTopic('inbox', clean, 'req', reqId), { app:'splidchat', type:'friend-req', reqId, from: { ...meCard(me), pic: me.pic || '' }, ts: Date.now() }, true);
