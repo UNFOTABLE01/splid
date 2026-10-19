@@ -753,6 +753,29 @@ async function fetchChatState(id, timeout) {
   return r.data && r.data.state ? r.data.state : null;
 }
 
+/* owner directory scan — one-shot wildcard pull: subscribe splidchat/v1/dir/+ for a few seconds and
+   collect every retained entry (retained messages are delivered on subscribe), then merge into the
+   live map the owner's subscription keeps warm. */
+function scanDir(timeout) {
+  return new Promise(resolve => {
+    if (typeof mqtt === 'undefined') { resolve({}); return; }
+    let c;
+    try { c = mqtt.connect(MQTT_URL, { clientId: 'splidd-' + uid(), keepalive: 20, reconnectPeriod: 0, connectTimeout: 6000 }); }
+    catch (e) { resolve({}); return; }
+    const acc = {};
+    let done = false;
+    const finish = () => { if (done) return; done = true; clearTimeout(to); try { c.end(true); } catch (e) {} resolve(acc); };
+    const to = setTimeout(finish, timeout || 5000);
+    c.on('connect', () => { try { c.subscribe(DIR_WILD, { qos: 0 }); } catch (e) {} });
+    c.on('message', (t, payload) => {
+      const s = payload.toString(); if (!s) return;
+      const m = t.match(/^splidchat\/v1\/dir\/([A-Z0-9]+)$/); if (!m) return;
+      try { const d = JSON.parse(s); if (d && d.type === 'dir' && d.id === m[1]) acc[d.id] = d; } catch (e) {}
+    });
+    c.on('error', () => finish());
+  });
+}
+
 const BROKERS = [MQTT_URL, 'wss://broker.emqx.io:8084/mqtt'];
 /* live handshake — when retained lookups come back empty (public brokers sometimes stop serving retained
    messages), ping splidchat/v1/need/<ID>: any ONLINE device that owns the ID answers with its profile or
@@ -1080,6 +1103,19 @@ const CREATOR_FILE_MAX = 100 * 1024;   /* 100 KB raw → ~137 KB base64, safe in
 const CREATOR_TEXT_MAX = 600;
 const CREATOR_TOPIC = cTopic('creator', 'msg');
 
+/* ---------------- owner HQ · DEVANSHU sees every ID & speaks to all of them ----------------
+   Directory: every device keeps ONE tiny retained entry at splidchat/v1/dir/<ID> (ID, name, color,
+   picture, joined, last-seen, friends count — NEVER passwords or chats). Subscribing to the wildcard
+   splidchat/v1/dir/+ lists every registered ID. A broadcast is one retained message on
+   splidchat/v1/broadcast that lands on every signed-in Splid app until the owner clears it. */
+const OWNER_ID = CREATOR_ID;
+const DIR_TOPIC = id => cTopic('dir', normId(id));
+const DIR_WILD = cTopic('dir', '+');
+const BROADCAST_TOPIC = cTopic('broadcast');
+const BROADCAST_TEXT_MAX = 600;
+const DIR_ONLINE_MS = 150000;                 /* an entry older than 2.5 min counts as gone quiet */
+const BC_SEEN_KEY = 'hisaab.chat.bseen';      /* per-user "already read" marker for announcements */
+
 const fileToB64 = file => new Promise((resolve, reject) => {
   const r = new FileReader();
   r.onload = () => resolve(String(r.result).split(',')[1] || '');
@@ -1092,6 +1128,16 @@ const b64ToBlob = (b64, mime) => {
   return new Blob([u], { type: mime || 'application/octet-stream' });
 };
 const fmtBytes = n => !n || n < 0 ? '0 B' : n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n >= 1024 ? Math.round(n / 1024) + ' KB' : n + ' B';
+const onlineNow = d => !!(d && d.on && d.at && (Date.now() - d.at) < DIR_ONLINE_MS);
+const ago = ts => {
+  if (!ts) return '';
+  const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (s < 45) return 'just now';
+  if (s < 3600) return Math.max(1, Math.round(s / 60)) + ' min ago';
+  if (s < 86400) return Math.round(s / 3600) + ' h ago';
+  return Math.round(s / 86400) + ' d ago';
+};
+const dayStamp = ts => { try { return new Date(ts).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }); } catch (e) { return ''; } };
 
 function CreatorBox({ me, chatOn, publish }) {
   const [msg, setMsg] = useState(null);          /* { from, text, file, ts } */
@@ -1218,6 +1264,169 @@ function CreatorBox({ me, chatOn, publish }) {
           ${!chatOn && html`<p className="text-[11.5px] font-semibold text-rust-deep mt-1.5">Chat network is offline — open Splid Chat once to connect, then publish.</p>`}
         </div>`}
         ${err && html`<p className="mt-3 rounded-2xl px-3.5 py-2.5 text-[12.5px] font-semibold leading-relaxed bg-rust-tint text-rust-deep border border-rust/25">${err}</p>`}
+      </div>
+    </div>
+  </section>`;
+}
+
+/* ---------------- Owner HQ · DEVANSHU's control room: every ID on Splid + a broadcast channel ---------------- */
+
+function OwnerHQ({ me, chatOn, dir, bc, publish, onRescan, friends, reqsOut, reqsIn, onAddFriend, onAccept, onDM, notify }) {
+  const [text, setText] = useState('');
+  const [file, setFile] = useState(null);
+  const [err, setErr] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [rmArm, setRmArm] = useState(0);
+  const [scan, setScan] = useState('idle');   /* idle | scanning */
+  const [q, setQ] = useState('');
+  const [, setTick] = useState(0);            /* keeps "last seen" labels fresh */
+
+  useEffect(() => {
+    let live = true;
+    setScan('scanning');
+    Promise.resolve(onRescan()).catch(() => {}).then(() => { if (live) setScan('idle'); });
+    const iv = setInterval(() => setTick(t => t + 1), 30000);
+    return () => { live = false; clearInterval(iv); };
+  }, []);
+
+  const entries = Object.values(dir || {})
+    .filter(d => d && d.id)
+    .filter(d => {
+      const s = q.trim().toLowerCase();
+      if (!s) return true;
+      return (d.name || '').toLowerCase().indexOf(s) >= 0 || d.id.indexOf(normId(s)) >= 0;
+    })
+    .sort((a, b) => (onlineNow(b) ? 1 : 0) - (onlineNow(a) ? 1 : 0) || (b.at || 0) - (a.at || 0) || (a.name || '').localeCompare(b.name || ''));
+  const onlineCount = Object.values(dir || {}).filter(onlineNow).length;
+  const myId = normId(me && me.id);
+
+  const pickFile = e => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    if (f.size > CREATOR_FILE_MAX) { setErr('That file is ' + fmtBytes(f.size) + ' — attachments are capped at 100 KB, because it rides inside one network message.'); return; }
+    setErr(null); setFile(f);
+  };
+
+  const sendBc = async () => {
+    if (busy) return;
+    const t = text.trim();
+    if (!t && !file) return;
+    setBusy(true); setErr(null);
+    let fin = null;
+    if (file) {
+      try { fin = { name: String(file.name).slice(0, 80), mime: file.type || '', size: file.size, data: await fileToB64(file) }; }
+      catch (e) { setErr("Couldn't read that file — try another one."); setBusy(false); return; }
+    }
+    const payload = { app: 'splidchat', type: 'broadcast', bid: uid() + Date.now().toString(36), updatedAt: Date.now(),
+      from: { id: me.id, name: me.name, color: me.color, pic: me.pic || '' },
+      msg: { text: t.slice(0, BROADCAST_TEXT_MAX), file: fin, ts: Date.now() } };
+    if (JSON.stringify(payload).length > 190000) { setErr('That attachment is too big for the network message — keep it under 100 KB.'); setBusy(false); return; }
+    if (!publish(payload)) { setErr('Chat network is offline — connect first, then publish.'); setBusy(false); return; }
+    setText(''); setFile(null); setBusy(false);
+    notify('Broadcast sent to every Splid ID', 'send');
+  };
+
+  const clearBc = () => {
+    if (busy) return;
+    if (!publish(null)) { setErr('Chat network is offline — connect first, then try again.'); return; }
+    setErr(null); notify('Broadcast removed everywhere', 'trash');
+  };
+
+  const doRescan = async () => {
+    setScan('scanning');
+    try { await onRescan(); } catch (e) {}
+    setScan('idle');
+  };
+
+  const rmLabel = rmArm && Date.now() - rmArm < 3000 ? 'Tap again to remove' : 'Remove broadcast';
+  const ts = bc && bc.msg && bc.msg.ts ? new Date(bc.msg.ts).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '';
+
+  return html`<section className="max-w-3xl mx-auto px-4 sm:px-6 mt-12" aria-label="Owner HQ">
+    <div className="rounded-3xl border border-line bg-card shadow-soft overflow-hidden">
+      <div className="bg-ink text-paper px-5 py-3.5 flex items-center gap-2.5">
+        <${Icon} name="book" size=${15} sw=${2}/>
+        <span className="font-display font-bold tracking-[.22em] text-[12px] uppercase">Owner HQ</span>
+        <span className="ml-auto text-[10px] font-mono font-bold tracking-[.14em] text-paper/60 numtab">SPLID ID · ${chunkCode(CREATOR_ID)}</span>
+      </div>
+      <div className="p-5">
+
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <span className="rounded-full bg-sage-tint text-sage-deep text-[11px] font-bold tracking-[.1em] uppercase px-3 py-1.5 numtab">${Object.keys(dir || {}).length} ids on splid</span>
+          <span className="rounded-full bg-sage-tint text-sage-deep text-[11px] font-bold tracking-[.1em] uppercase px-3 py-1.5 numtab inline-flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-sage live-dot"></span>${onlineCount} online now</span>
+          <button onClick=${doRescan} disabled=${scan === 'scanning'}
+            className="ml-auto rounded-full border border-line bg-paper px-3.5 py-1.5 text-[12px] font-semibold inline-flex items-center gap-1.5 hover:border-muted transition active:scale-95 disabled:opacity-60">
+            <${Icon} name="replay" size=${12} sw=${2.2}/>${scan === 'scanning' ? 'Scanning…' : 'Rescan'}
+          </button>
+        </div>
+
+        <div className="mt-5 pt-4 border-t border-line">
+          <div className="text-[10.5px] font-bold tracking-[.16em] uppercase text-muted mb-2.5 flex items-center gap-1.5"><${Icon} name="send" size=${11} sw=${2.4}/>Announce to every ID on Splid</div>
+          ${bc && bc.msg && html`<div className="mb-3 rounded-2xl border border-line bg-paper px-3.5 py-3">
+            <div className="text-[10px] font-bold tracking-[.14em] uppercase text-muted numtab">Live now · sent ${ts}</div>
+            <p className="text-[13px] leading-relaxed mt-1.5 whitespace-pre-wrap">${bc.msg.text}</p>
+            ${bc.msg.file && html`<p className="text-[11.5px] text-muted numtab mt-1.5">attached: ${bc.msg.file.name} (${fmtBytes(bc.msg.file.size)})</p>`}
+          </div>`}
+          <textarea className="inp resize-none" rows=${2} maxLength=${BROADCAST_TEXT_MAX} placeholder="A message that lands on every signed-in Splid app…"
+            value=${text} onChange=${e => { setText(e.target.value); setErr(null); }}></textarea>
+          <div className="mt-2.5 flex items-center gap-2 flex-wrap">
+            <label className="cursor-pointer rounded-full border border-line bg-paper px-3.5 py-2 text-[12.5px] font-semibold inline-flex items-center gap-1.5 hover:border-muted transition active:scale-95">
+              <${Icon} name="clip" size=${13} sw=${2.2}/>${file ? 'Swap file' : 'Attach a file'}
+              <input type="file" className="hidden" onChange=${pickFile}/>
+            </label>
+            ${file && html`<span className="text-[12px] font-semibold text-ink inline-flex items-center gap-1.5 max-w-[250px] min-w-0">
+              <${Icon} name="doc" size=${13} className="shrink-0"/>
+              <span className="truncate">${file.name}</span>
+              <span className="text-muted numtab shrink-0">· ${fmtBytes(file.size)}</span>
+              <button onClick=${() => setFile(null)} className="text-muted hover:text-rust-deep shrink-0" aria-label="Remove file"><${Icon} name="x" size=${13}/></button>
+            </span>`}
+            <button onClick=${sendBc} disabled=${busy || (!text.trim() && !file)}
+              className=${'ml-auto rounded-full px-4 py-2 text-[12.5px] font-semibold transition active:scale-95 inline-flex items-center gap-1.5 ' +
+                (busy || (!text.trim() && !file) ? 'bg-ink/20 text-paper cursor-not-allowed' : 'bg-ink text-paper hover:bg-ink/90')}>
+              <${Icon} name="send" size=${13} sw=${2.2}/>${busy ? 'Broadcasting…' : 'Broadcast to everyone'}
+            </button>
+            ${bc && html`<button onClick=${() => { if (rmArm && Date.now() - rmArm < 3000) { setRmArm(0); clearBc(); } else setRmArm(Date.now()); }} disabled=${busy}
+              className="rounded-full border border-rust/30 text-rust-deep px-3.5 py-2 text-[12.5px] font-semibold hover:bg-rust-tint transition active:scale-95">${rmLabel}</button>`}
+          </div>
+          <p className="text-[11px] text-muted/70 mt-2 leading-relaxed">One retained network message — every person holding a Splid ID gets it at the top of their chat, with a chime, until they tap Got it. Files up to 100 KB ride inside the message itself.</p>
+        </div>
+
+        <div className="mt-5 pt-4 border-t border-line">
+          <div className="text-[10.5px] font-bold tracking-[.16em] uppercase text-muted mb-2.5 flex items-center gap-1.5"><${Icon} name="users" size=${11} sw=${2.4}/>Every ID on Splid</div>
+          <input className="inp mb-2.5" placeholder="Search name or ID…" value=${q} onChange=${e => setQ(e.target.value)} maxLength=${24}/>
+          ${entries.length === 0 && html`<div className="text-[13px] text-muted py-2 leading-relaxed">${scan === 'scanning' ? 'Scanning the network for IDs…' : 'No IDs found yet — they appear here as soon as devices come online. Hit Rescan.'}</div>`}
+          <div className="space-y-2">
+            ${entries.map(d => {
+              const isMe = d.id === myId;
+              const isFriend = !!(friends && friends[d.id]);
+              const pending = Object.values(reqsOut || {}).some(r => r.to && r.to.id === d.id);
+              const incoming = Object.values(reqsIn || {}).find(r => r.from && r.from.id === d.id);
+              const fr = d.fr || 0;
+              return html`<div key=${d.id} className=${'rounded-2xl border px-3.5 py-3 flex items-center gap-3 ' + (isMe ? 'border-ink/40 bg-ink/5' : 'border-line bg-paper')}>
+                <${Avatar} m=${{ pic: d.pic, name: d.name || '?', color: d.color || '#4283F2' }} size=${38}/>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-[14px] font-semibold truncate">${d.name || 'Unnamed'}</span>
+                    ${isMe && html`<span className="shrink-0 text-[9.5px] font-bold tracking-[.12em] uppercase rounded-full bg-ink text-paper px-2 py-0.5">owner</span>`}
+                  </div>
+                  <div className="text-[11.5px] text-muted numtab truncate">${chunkCode(d.id)} · ${fr} friend${fr === 1 ? '' : 's'} · joined ${d.joined ? dayStamp(d.joined) : '—'}</div>
+                  <div className=${'text-[11px] numtab mt-0.5 inline-flex items-center gap-1.5 ' + (onlineNow(d) ? 'text-sage-deep font-semibold' : 'text-muted')}>
+                    <span className=${'w-1.5 h-1.5 rounded-full ' + (onlineNow(d) ? 'bg-sage live-dot' : 'bg-muted/50')}></span>${onlineNow(d) ? 'online now' : d.at ? 'last seen ' + ago(d.at) : 'last seen long ago'}
+                  </div>
+                </div>
+                ${isMe ? null
+                  : isFriend ? html`<button onClick=${() => onDM(d.id)} className="shrink-0 rounded-full bg-ink text-paper text-[12.5px] font-semibold px-3.5 py-2 hover:bg-ink/90 active:scale-95 transition inline-flex items-center gap-1.5"><${Icon} name="chat" size=${13}/>Chat</button>`
+                  : incoming ? html`<button onClick=${() => onAccept(incoming.reqId)} className="shrink-0 rounded-full bg-sage text-paper text-[12.5px] font-semibold px-3.5 py-2 hover:bg-sage-deep active:scale-95 transition">Accept</button>`
+                  : pending ? html`<span className="shrink-0 text-[12px] font-semibold text-muted numtab">Pending</span>`
+                  : html`<button onClick=${() => onAddFriend(d.id)} className="shrink-0 rounded-full border border-line bg-card text-[12.5px] font-semibold px-3.5 py-2 hover:border-muted active:scale-95 transition inline-flex items-center gap-1.5"><${Icon} name="userPlus" size=${13}/>Add</button>`}
+              </div>`;
+            })}
+          </div>
+          <p className="text-[11px] text-muted/70 mt-3 leading-relaxed">The directory is the public face of Splid — ID, name, color, picture, joined date, friends count and last-seen, the same info the network already shares for adding friends. Passwords, requests and chats never leave their owners.</p>
+        </div>
+
+        ${err && html`<p className="mt-3 rounded-2xl px-3.5 py-2.5 text-[12.5px] font-semibold leading-relaxed bg-rust-tint text-rust-deep border border-rust/25">${err}</p>`}
+        ${!chatOn && html`<p className="mt-2 text-[11.5px] font-semibold text-rust-deep">Chat network is offline — open Splid Chat once to connect; Rescan works anyway.</p>`}
       </div>
     </div>
   </section>`;
@@ -2534,6 +2743,32 @@ function ChatHome({ chat, api, onOpenThread, onAddFriend, onEditProfile }) {
         <${Icon} name="arrR" size=${16} className="text-paper/45 shrink-0 transition-transform duration-200 group-hover:translate-x-0.5"/>
       </button>
 
+      ${api.bc && api.bc.msg && api.bcSeen !== api.bc.bid && html`<div className="rise mt-4 bg-card border border-[#E8B15C]/70 rounded-3xl shadow-soft p-4 sm:p-5">
+        <div className="flex items-center gap-2.5 mb-3">
+          <span className="w-8 h-8 rounded-2xl bg-[#E8B15C]/20 text-[#B4791F] flex items-center justify-center shrink-0"><${Icon} name="sparkle" size=${14}/></span>
+          <span className="text-[10.5px] font-bold tracking-[.18em] uppercase text-[#B4791F]">Announcement · to every Splid ID</span>
+        </div>
+        <div className="flex gap-3">
+          <${Avatar} m=${{ pic: api.bc.from && api.bc.from.pic, name: (api.bc.from && api.bc.from.name) || 'Owner', color: (api.bc.from && api.bc.from.color) || '#26221B' }} size=${36}/>
+          <div className="flex-1 min-w-0">
+            <div className="text-[13.5px] font-semibold">${(api.bc.from && api.bc.from.name) || 'Owner'}</div>
+            <p className="text-[13px] leading-relaxed mt-1 whitespace-pre-wrap">${api.bc.msg.text}</p>
+            ${api.bc.msg.file && api.bc.msg.file.data && html`<button onClick=${api.dlBroadcast} className="mt-2.5 w-full flex items-center gap-3 rounded-2xl border border-line bg-paper px-3.5 py-2.5 hover:border-muted transition active:scale-[.98] text-left">
+              <span className="w-9 h-9 rounded-xl bg-ink/5 text-ink flex items-center justify-center shrink-0"><${Icon} name="doc" size=${16}/></span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[13px] font-semibold truncate">${api.bc.msg.file.name}</span>
+                <span className="block text-[11px] text-muted numtab">${fmtBytes(api.bc.msg.file.size || 0)} · from the owner</span>
+              </span>
+              <span className="shrink-0 text-[12px] font-bold inline-flex items-center gap-1.5 text-ink"><${Icon} name="download" size=${14} sw=${2.2}/>Download</span>
+            </button>`}
+            <div className="flex items-center justify-between gap-2 mt-3">
+              <span className="text-[11px] text-muted/70 numtab">— ${api.bc.msg.ts ? new Date(api.bc.msg.ts).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : ''}</span>
+              <button onClick=${() => api.onBcSeen(api.bc.bid)} className="rounded-full bg-ink text-paper text-[12px] font-semibold px-3.5 py-1.5 hover:bg-ink/90 active:scale-95 transition">Got it</button>
+            </div>
+          </div>
+        </div>
+      </div>`}
+
       ${reqsIn.length > 0 && html`<div className="mt-6">
         <div className="flex items-center gap-3 mb-2.5">
           <span className="text-[11px] font-bold tracking-[.18em] uppercase text-muted">Requests · ${reqsIn.length}</span>
@@ -3156,6 +3391,9 @@ function App() {
   const [chatOpen, setChatOpen] = useState(false);
   const [chatView, setChatView] = useState('home');
   const [chatOn, setChatOn] = useState(false);
+  const [chatDir, setChatDir] = useState({});   /* owner HQ: every dir entry on the network, id → entry */
+  const [chatBc, setChatBc] = useState(null);   /* the owner's live broadcast, if any */
+  const [bcSeen, setBcSeen] = useState(() => { try { return localStorage.getItem(BC_SEEN_KEY) || ''; } catch (e) { return ''; } });
   const [presence, setPresence] = useState({});
   const [typing, setTyping] = useState({});
   const chatClientRef = useRef(null);
@@ -3172,6 +3410,34 @@ function App() {
     try { c.publish(topic, obj === null ? '' : JSON.stringify(obj), { qos: 0, retain: !!retain }); return true; } catch (e) { return false; }
   };
   const meCard = me => ({ id: me.id, name: me.name, color: me.color });
+
+  /* owner-directory entry — one small retained beacon per ID. on=1 while this device is live,
+     refreshed by a heartbeat every 2 min; logout / tab close / account delete flip it to on=0.
+     Carries NO passwords, requests or chats — only what add-friend already shares publicly. */
+  const dirPublish = on => {
+    const me = chatRef.current.me; if (!me) return;
+    let joined = me.joinedAt;
+    if (!joined) {
+      const v = vaultGet(me.id);
+      joined = (v && v.joinedAt) || Date.now();
+      if (!v || !v.joinedAt) vaultPut(me.id, { joinedAt: joined });
+      patchChat(c => (c.me && !c.me.joinedAt) ? { ...c, me: { ...c.me, joinedAt: joined } } : c);
+    }
+    const fr = Object.keys(chatRef.current.friends || {}).length;
+    chatPublish(DIR_TOPIC(me.id), { app: 'splidchat', type: 'dir', id: me.id, name: me.name, color: me.color, pic: me.pic || '', joined, at: Date.now(), on: on ? 1 : 0, fr }, true);
+  };
+  const rescanDir = async () => {
+    const res = await scanDir(5200);
+    if (res && Object.keys(res).length) setChatDir(p => ({ ...p, ...res }));
+    return res ? Object.keys(res).length : 0;
+  };
+  const ownerAddFriend = async id => {
+    try { const p = await sendFriendReq(id); showToast('Request sent to ' + firstName(p.name || p.id), 'userPlus'); }
+    catch (e) {
+      const msg = { bad: 'That ID looks wrong', offline: 'Chat network is offline', self: "That's you", already: 'Already friends', pending: 'Request already pending', incoming: 'They already requested you — check Requests', notfound: 'No Splid profile found for that ID' }[e] || 'Could not send the request';
+      showToast(msg, 'x');
+    }
+  };
 
   /* ---- file attachments (bytes go P2P over WebRTC; MQTT carries only signals) ---- */
   const [xfers, setXfers] = useState({});
@@ -3526,6 +3792,22 @@ function App() {
         fr[d.profile.id] = { ...f, name: d.profile.name || f.name, color: d.profile.color || f.color, pic: d.profile.pic !== undefined ? (d.profile.pic || '') : (f.pic || '') };
         return { ...c, friends: fr };
       });
+      return;
+    }
+    m = topic.match(/^splidchat\/v1\/dir\/([A-Z0-9]+)$/);
+    if (m) {
+      const s = payload.toString();
+      if (!s) { setChatDir(p => { if (!p[m[1]]) return p; const n = { ...p }; delete n[m[1]]; return n; }); return; }
+      let d; try { d = JSON.parse(s); } catch (e) { return; }
+      if (d && d.type === 'dir' && d.id === m[1]) setChatDir(p => ({ ...p, [d.id]: d }));
+      return;
+    }
+    if (topic === BROADCAST_TOPIC) {
+      const s = payload.toString();
+      if (!s) { setChatBc(null); return; }
+      let d; try { d = JSON.parse(s); } catch (e) { return; }
+      if (d && d.app === 'splidchat' && d.type === 'broadcast' && d.from && normId(d.from.id) === CREATOR_ID && d.msg) setChatBc(d);
+      return;
     }
   };
 
@@ -3546,10 +3828,13 @@ function App() {
       chatSubsRef.current.add(cTopic('inbox', me2.id, '#'));
       chatSubsRef.current.add(cTopic('need', me2.id)); /* live handshake listener — answers identity pings */
       chatSubsRef.current.add(cTopic('profile', me2.id));
+      chatSubsRef.current.add(BROADCAST_TOPIC);          /* owner announcements reach every signed-in app */
+      if (normId(me2.id) === CREATOR_ID) chatSubsRef.current.add(DIR_WILD); /* owner only: the live directory feed */
       Object.keys(chatRef.current.friends || {}).forEach(f => { chatSubsRef.current.add(cTopic('presence', f)); chatSubsRef.current.add(cTopic('profile', f)); });
       chatSubsRef.current.forEach(t => { try { c.subscribe(t, { qos: 0 }); } catch (e) {} });
       chatPublish(cTopic('presence', me2.id), { app:'splidchat', on: 1, t: Date.now() }, true);
       chatPublish(cTopic('profile', me2.id), { app:'splidchat', type:'profile', profile: { id: me2.id, name: me2.name, color: me2.color, pic: me2.pic || '', dev: me2.dev, salt: me2.salt, hash: me2.hash }, updatedAt: Date.now() }, true);
+      dirPublish(1);
     });
     c.on('close', () => setChatOn(false));
     c.on('error', () => {});
@@ -3557,6 +3842,22 @@ function App() {
   };
 
   useEffect(() => { if (chat.me && !chatClientRef.current) connectChat(); }, [chat.me && chat.me.id]);
+
+  /* directory heartbeat — while online, keep THIS device's dir entry fresh (last-seen + friends count) */
+  useEffect(() => {
+    if (!chatOn || !chat.me) return;
+    dirPublish(1);
+    const iv = setInterval(() => { if (chatRef.current.me && chatClientRef.current) dirPublish(1); }, 120000);
+    return () => clearInterval(iv);
+  }, [chatOn, chat.me && chat.me.id]);
+
+  /* announcement chime — one toast when a broadcast this user hasn't seen lands */
+  useEffect(() => {
+    if (!chatBc || !chat.me) return;
+    if (normId(chat.me.id) === CREATOR_ID) return;
+    if (bcSeen === chatBc.bid) return;
+    showToast('Announcement from ' + firstName((chatBc.from && chatBc.from.name) || 'the owner'), 'sparkle');
+  }, [chatBc && chatBc.bid, bcSeen, chat.me && chat.me.id]);
 
   const friendsSig = Object.keys(chat.friends || {}).sort().join(',');
   useEffect(() => {
@@ -3580,7 +3881,11 @@ function App() {
   useEffect(() => {
     const bye = () => {
       const me = chatRef.current.me; const c = chatClientRef.current;
-      if (me && c) { try { c.publish(cTopic('presence', me.id), '', { qos: 0, retain: true }); } catch (e) {} try { c.end(true); } catch (e) {} }
+      if (me && c) {
+        try { c.publish(DIR_TOPIC(me.id), JSON.stringify({ app: 'splidchat', type: 'dir', id: me.id, name: me.name, color: me.color, pic: me.pic || '', joined: me.joinedAt || Date.now(), at: Date.now(), on: 0, fr: Object.keys((chatRef.current.friends) || {}).length }), { qos: 0, retain: true }); } catch (e) {}
+        try { c.publish(cTopic('presence', me.id), '', { qos: 0, retain: true }); } catch (e) {}
+        try { c.end(true); } catch (e) {}
+      }
     };
     window.addEventListener('beforeunload', bye);
     return () => { window.removeEventListener('beforeunload', bye); if (chatClientRef.current) { try { chatClientRef.current.end(true); } catch (e) {} } };
@@ -3594,7 +3899,7 @@ function App() {
       const me = chatRef.current.me;
       if (!me || restoreRef.current) return;
       const base = {
-        me: { id: me.id, name: me.name, color: me.color, pic: me.pic || '', salt: me.salt, hash: me.hash },
+        me: { id: me.id, name: me.name, color: me.color, pic: me.pic || '', joinedAt: me.joinedAt, salt: me.salt, hash: me.hash },
         friends: chatRef.current.friends || {},
         reqsIn: chatRef.current.reqsIn || {},
         reqsOut: chatRef.current.reqsOut || {},
@@ -3625,7 +3930,7 @@ function App() {
     if (v0 && v0.salt && v0.hash) return { taken: false, takenLocal: true }; /* this device already owns that ID */
     const salt = uid() + uid();
     const hash = await pwHash(salt, pw);
-    const me = { id: clean, name: name.trim().slice(0, 24), color: color || AV[hashStr(clean) % AV.length], pic: pic || '', dev: db.deviceId, salt, hash };
+    const me = { id: clean, name: name.trim().slice(0, 24), color: color || AV[hashStr(clean) % AV.length], pic: pic || '', joinedAt: Date.now(), dev: db.deviceId, salt, hash };
     vaultPut(clean, { salt, hash, name: me.name, color: me.color, pic: me.pic || '' });
     restoreRef.current = false;
     patchChat(c => ({ ...(c || freshChat()), me }));
@@ -3697,6 +4002,7 @@ function App() {
       name: (base && base.me && base.me.name) || src.name || clean,
       color: (base && base.me && base.me.color) || src.color || AV[hashStr(clean) % AV.length],
       pic: src.pic || (base && base.me && base.me.pic) || '',
+      joinedAt: (base && base.me && base.me.joinedAt) || (src && src.me && src.me.joinedAt) || (src && src.joinedAt) || Date.now(),
       dev: db.deviceId, salt: src.salt, hash: src.hash,
     };
     restoreRef.current = true;
@@ -3709,7 +4015,7 @@ function App() {
       unread: (base && base.unread) || {},
       seenUpto: (base && base.seenUpto) || {},
     }));
-    const entry = { salt: src.salt, hash: src.hash, name: me.name, color: me.color, pic: me.pic }; /* remember it here — next sign-in is instant */
+    const entry = { salt: src.salt, hash: src.hash, name: me.name, color: me.color, pic: me.pic, joinedAt: me.joinedAt }; /* remember it here — next sign-in is instant */
     if (base) entry.archive = { at: Date.now(), state: vaultPickState(base) };
     vaultPut(clean, entry);
     setTimeout(() => { restoreRef.current = false; }, 4000);
@@ -3729,6 +4035,7 @@ function App() {
       chatPublish(cTopic('profile', me.id), null, true);
       chatPublish(cTopic('state', me.id), null, true);
       chatPublish(cTopic('presence', me.id), '', true);
+      chatPublish(DIR_TOPIC(me.id), null, true);   /* the directory forgets this ID */
       vaultDrop(me.id); /* the keyring forgets this ID too */
       try {
         const w = mqtt.connect(MQTT_URL, { clientId: 'splidx-' + uid(), keepalive: 10, reconnectPeriod: 0, connectTimeout: 6000 });
@@ -3754,6 +4061,7 @@ function App() {
     const me = chatRef.current.me;
     const c = chatClientRef.current;
     if (me) vaultArchive(me.id, chatRef.current); /* save everything BEFORE wiping — next sign-in here restores it instantly, even offline */
+    if (me && c) dirPublish(0);                    /* mark this ID offline in the owner directory */
     if (me && c) { try { c.publish(cTopic('presence', me.id), '', { qos: 0, retain: true }); } catch (e) {} }
     if (c) { setTimeout(() => { try { c.end(true); } catch (e) {} }, 500); } /* let the presence clear flush */
     chatClientRef.current = null;
@@ -3771,6 +4079,7 @@ function App() {
     patchChat(c => ({ ...c, me: next }));
     vaultPut(me.id, { salt: me.salt, hash: me.hash, name: next.name, color: next.color, pic: next.pic });
     chatPublish(cTopic('profile', me.id), { app:'splidchat', type:'profile', profile: { id: me.id, name: next.name, color: next.color, pic: next.pic, dev: me.dev, salt: me.salt, hash: me.hash }, updatedAt: Date.now() }, true);
+    dirPublish(1);
     showToast('Profile updated', 'check');
   };
 
@@ -3802,6 +4111,7 @@ function App() {
     });
     chatPublish(cTopic('inbox', r.from.id, 'acc', reqId), { app:'splidchat', type:'friend-acc', reqId, from: { ...meCard(chat.me), pic: chat.me.pic || '' }, ts: Date.now() }, true);
     chatPublish(cTopic('inbox', chat.me.id, 'req', reqId), null, true);
+    dirPublish(1);
     showToast((r.from.name || 'They') + ' is now your friend', 'check');
   };
 
@@ -3857,7 +4167,19 @@ function App() {
     if (chat.me) chatPublish(cTopic('inbox', fid, 'typ'), { app:'splidchat', type:'typ', from: chat.me.id }, false);
   };
 
-  const chatApi = { online: chatOn, presence, typing, xfers, createIdentity, signIn: signInIdentity, logout: logoutChat, deleteAcc: deleteAccount, updateProfile, sendFriendReq, acceptReq, declineReq, cancelReq, unfriend, sendMsg, markRead, pingTyping, attachFile, startDownload, peekOutFile: mid => outFiles.current.get(mid) || null, loadFile: mid => loadFileBlob(mid) };
+  const chatApi = { online: chatOn, presence, typing, xfers, createIdentity, signIn: signInIdentity, logout: logoutChat, deleteAcc: deleteAccount, updateProfile, sendFriendReq, acceptReq, declineReq, cancelReq, unfriend, sendMsg, markRead, pingTyping, attachFile, startDownload, peekOutFile: mid => outFiles.current.get(mid) || null, loadFile: mid => loadFileBlob(mid),
+    bc: chatBc, bcSeen,
+    onBcSeen: bid => { try { localStorage.setItem(BC_SEEN_KEY, bid); } catch (e) {} setBcSeen(bid); },
+    dlBroadcast: () => {
+      const b = chatBc && chatBc.msg && chatBc.msg.file;
+      if (!b || !b.data) return;
+      try {
+        const url = URL.createObjectURL(b64ToBlob(b.data, b.mime));
+        const a = document.createElement('a'); a.href = url; a.download = b.name || 'broadcast-file';
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 4000);
+      } catch (e) {}
+    } };
 
   const saveExpense = exp => {
     pendingPush.current = true;
@@ -3988,6 +4310,14 @@ function App() {
         : html`<${ActivityTab} group=${group} byId=${byId}
             onDelete=${deleteExpense} onEdit=${openAdd} onDeleteSettlement=${deleteSettlement}/>`}
     </main>
+
+    ${chat.me && normId(chat.me.id) === CREATOR_ID && html`<${OwnerHQ} me=${chat.me} chatOn=${chatOn} dir=${chatDir} bc=${chatBc}
+      publish=${p => chatPublish(BROADCAST_TOPIC, p, true)}
+      onRescan=${rescanDir}
+      friends=${chat.friends || {}} reqsOut=${chat.reqsOut || {}} reqsIn=${chat.reqsIn || {}}
+      onAddFriend=${ownerAddFriend} onAccept=${acceptReq}
+      onDM=${id => { setChatView(id); setChatOpen(true); }}
+      notify=${showToast}/>`}
 
     <${CreatorBox} me=${chat.me} chatOn=${chatOn} publish=${p => chatPublish(CREATOR_TOPIC, p, true)}/>
 
