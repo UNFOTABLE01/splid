@@ -1070,6 +1070,159 @@ function ToastView({ toast }) {
   </div>`;
 }
 
+/* ---------------- message from the creator · DEVANSHU's note + file, delivered to every user ----------------
+   The box at the very end of the page. Anyone signed in with the SPLID ID DEVANSHU can write a note and
+   attach a file (≤100 KB — it rides inside one retained network message); every visitor's box pulls it
+   off the live network, so the message follows the app everywhere, no backend needed. */
+
+const CREATOR_ID = 'DEVANSHU';
+const CREATOR_FILE_MAX = 100 * 1024;   /* 100 KB raw → ~137 KB base64, safe inside a retained payload */
+const CREATOR_TEXT_MAX = 600;
+const CREATOR_TOPIC = cTopic('creator', 'msg');
+
+const fileToB64 = file => new Promise((resolve, reject) => {
+  const r = new FileReader();
+  r.onload = () => resolve(String(r.result).split(',')[1] || '');
+  r.onerror = () => reject(r.error);
+  r.readAsDataURL(file);
+});
+const b64ToBlob = (b64, mime) => {
+  const bin = atob(b64), u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  return new Blob([u], { type: mime || 'application/octet-stream' });
+};
+const fmtBytes = n => !n || n < 0 ? '0 B' : n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n >= 1024 ? Math.round(n / 1024) + ' KB' : n + ' B';
+
+function CreatorBox({ me, chatOn, publish }) {
+  const [msg, setMsg] = useState(null);          /* { from, text, file, ts } */
+  const [phase, setPhase] = useState('loading'); /* loading | none | ready */
+  const [text, setText] = useState('');
+  const [file, setFile] = useState(null);
+  const [err, setErr] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const isCreator = !!(me && normId(me.id) === CREATOR_ID);
+
+  useEffect(() => {
+    let live = true;
+    setPhase('loading');
+    pullRetained(CREATOR_TOPIC,
+      d => d && d.app === 'splidchat' && d.type === 'creator-msg' && d.from && normId(d.from.id) === CREATOR_ID && d.msg,
+      { timeout: 7000, fastMs: 3200 })
+      .then(r => {
+        if (!live) return;
+        if (r.data && r.data.msg) { setMsg({ from: r.data.from, text: r.data.msg.text, file: r.data.msg.file, ts: r.data.msg.ts }); setPhase('ready'); }
+        else setPhase('none');
+      });
+    return () => { live = false; };
+  }, []);
+
+  const pickFile = e => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    if (f.size > CREATOR_FILE_MAX) { setErr('That file is ' + fmtBytes(f.size) + ' — attachments here are capped at 100 KB, because it rides inside one network message.'); return; }
+    setErr(null); setFile(f);
+  };
+
+  const send = async () => {
+    if (busy) return;
+    const t = text.trim();
+    if (!t && !file) return;
+    setBusy(true); setErr(null);
+    let fin = null;
+    if (file) {
+      try { fin = { name: String(file.name).slice(0, 80), mime: file.type || '', size: file.size, data: await fileToB64(file) }; }
+      catch (e) { setErr('Couldn’t read that file — try another one.'); setBusy(false); return; }
+    }
+    const payload = { app: 'splidchat', type: 'creator-msg', updatedAt: Date.now(),
+      from: { id: me.id, name: me.name, color: me.color, pic: me.pic || '' },
+      msg: { text: t.slice(0, CREATOR_TEXT_MAX), file: fin, ts: Date.now() } };
+    if (JSON.stringify(payload).length > 190000) { setErr('That attachment is too big for the network message — keep it under 100 KB.'); setBusy(false); return; }
+    if (!publish(payload)) { setErr('Chat network is offline — open Splid Chat once so this device connects, then publish.'); setBusy(false); return; }
+    setMsg({ from: payload.from, text: payload.msg.text, file: payload.msg.file, ts: payload.msg.ts });
+    setPhase('ready'); setText(''); setFile(null); setBusy(false);
+  };
+
+  const clearMsg = () => {
+    if (busy) return;
+    if (!publish(null)) { setErr('Chat network is offline — connect first, then try again.'); return; }
+    setMsg(null); setPhase('none'); setFile(null); setErr(null);
+  };
+
+  const dl = () => {
+    if (!msg || !msg.file || !msg.file.data) return;
+    try {
+      const url = URL.createObjectURL(b64ToBlob(msg.file.data, msg.file.mime));
+      const a = document.createElement('a');
+      a.href = url; a.download = msg.file.name || 'creator-file';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    } catch (e) {}
+  };
+
+  const ts = msg && msg.ts ? new Date(msg.ts).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '';
+
+  return html`<section className="max-w-3xl mx-auto px-4 sm:px-6 mt-12" aria-label="Message from the creator">
+    <div className="rounded-3xl border border-line bg-card shadow-soft overflow-hidden">
+      <div className="bg-ink text-paper px-5 py-3.5 flex items-center gap-2.5">
+        <${Icon} name="sparkle" size=${15} sw=${2}/>
+        <span className="font-display font-bold tracking-[.22em] text-[12px] uppercase">Message from creator</span>
+        <span className="ml-auto text-[10px] font-mono font-bold tracking-[.14em] text-paper/60 numtab">SPLID ID · ${chunkCode(CREATOR_ID)}</span>
+      </div>
+      <div className="p-5">
+        ${phase === 'loading' && html`<div className="flex items-center gap-2.5 text-[13px] text-muted py-2"><span className="w-1.5 h-1.5 rounded-full bg-sage live-dot"></span>Checking for a message from the creator…</div>`}
+        ${phase === 'none' && html`<div className="text-[13px] text-muted py-2 leading-relaxed">No message from the creator right now — check back soon.</div>`}
+        ${phase === 'ready' && msg && html`<div className="flex gap-3.5">
+          <span className="w-10 h-10 rounded-full text-[#FCF9F3] text-[15px] font-semibold flex items-center justify-center shrink-0 shadow-soft" style=${{ background: (msg.from && msg.from.color) || '#26221B' }}>${((msg.from && msg.from.name) || 'D')[0].toUpperCase()}</span>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-baseline gap-2 flex-wrap">
+              <span className="text-[14px] font-bold">${(msg.from && msg.from.name) || 'Devanshu'}</span>
+              <span className="text-[10px] font-mono font-bold tracking-[.12em] text-muted numtab">CREATOR</span>
+            </div>
+            ${msg.text && html`<p className="text-[13.5px] leading-relaxed mt-1.5 whitespace-pre-wrap">${msg.text}</p>`}
+            ${msg.file && html`<button onClick=${dl} className="mt-3 w-full flex items-center gap-3 rounded-2xl border border-line bg-paper px-3.5 py-2.5 hover:border-muted transition active:scale-[.98] text-left">
+              <span className="w-9 h-9 rounded-xl bg-ink/5 text-ink flex items-center justify-center shrink-0"><${Icon} name="doc" size=${16}/></span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[13px] font-semibold truncate">${msg.file.name}</span>
+                <span className="block text-[11px] text-muted numtab">${fmtBytes(msg.file.size || 0)} · attached by the creator</span>
+              </span>
+              <span className="shrink-0 text-[12px] font-bold inline-flex items-center gap-1.5 text-ink"><${Icon} name="download" size=${14} sw=${2.2}/>Download</span>
+            </button>`}
+            ${ts && html`<p className="text-[11px] text-muted/70 mt-2.5 numtab">— sent ${ts}</p>`}
+          </div>
+        </div>`}
+
+        ${isCreator && html`<div className="mt-5 pt-4 border-t border-line">
+          <div className="text-[10.5px] font-bold tracking-[.16em] uppercase text-muted mb-2.5 flex items-center gap-1.5"><${Icon} name="pencil" size=${11} sw=${2.4}/>You’re signed in as the creator — write to every user</div>
+          <textarea className="inp resize-none" rows=${2} maxLength=${CREATOR_TEXT_MAX} placeholder="A note for everyone who opens Splid…"
+            value=${text} onChange=${e => { setText(e.target.value); setErr(null); }}></textarea>
+          <div className="mt-2.5 flex items-center gap-2 flex-wrap">
+            <label className="cursor-pointer rounded-full border border-line bg-paper px-3.5 py-2 text-[12.5px] font-semibold inline-flex items-center gap-1.5 hover:border-muted transition active:scale-95">
+              <${Icon} name="clip" size=${13} sw=${2.2}/>${file ? 'Swap file' : 'Attach a file'}
+              <input type="file" className="hidden" onChange=${pickFile}/>
+            </label>
+            ${file && html`<span className="text-[12px] font-semibold text-ink inline-flex items-center gap-1.5 max-w-[230px] min-w-0">
+              <${Icon} name="doc" size=${13} className="shrink-0"/>
+              <span className="truncate">${file.name}</span>
+              <span className="text-muted numtab shrink-0">· ${fmtBytes(file.size)}</span>
+            </span>`}
+            <button onClick=${send} disabled=${busy || (!text.trim() && !file)}
+              className=${'ml-auto rounded-full px-4 py-2 text-[12.5px] font-semibold transition active:scale-95 inline-flex items-center gap-1.5 ' +
+                (busy || (!text.trim() && !file) ? 'bg-ink/20 text-paper cursor-not-allowed' : 'bg-ink text-paper hover:bg-ink/90')}>
+              <${Icon} name="send" size=${13} sw=${2.2}/>${busy ? 'Publishing…' : 'Publish to everyone'}
+            </button>
+            ${msg && html`<button onClick=${clearMsg} disabled=${busy}
+              className="rounded-full border border-rust/30 text-rust-deep px-3.5 py-2 text-[12.5px] font-semibold hover:bg-rust-tint transition active:scale-95">Remove message</button>`}
+          </div>
+          <p className="text-[11px] text-muted/70 mt-2 leading-relaxed">Published over the live message network — every Splid user sees it at the end of their page. Files up to 100 KB ride inside the message itself.</p>
+          ${!chatOn && html`<p className="text-[11.5px] font-semibold text-rust-deep mt-1.5">Chat network is offline — open Splid Chat once to connect, then publish.</p>`}
+        </div>`}
+        ${err && html`<p className="mt-3 rounded-2xl px-3.5 py-2.5 text-[12.5px] font-semibold leading-relaxed bg-rust-tint text-rust-deep border border-rust/25">${err}</p>`}
+      </div>
+    </div>
+  </section>`;
+}
+
 /* ---------------- footer · GitHub link + credit ---------------- */
 
 const GITHUB_URL = 'https://github.com/zencrypton/splid';
@@ -3835,6 +3988,8 @@ function App() {
         : html`<${ActivityTab} group=${group} byId=${byId}
             onDelete=${deleteExpense} onEdit=${openAdd} onDeleteSettlement=${deleteSettlement}/>`}
     </main>
+
+    <${CreatorBox} me=${chat.me} chatOn=${chatOn} publish=${p => chatPublish(CREATOR_TOPIC, p, true)}/>
 
     <${Footer}/>
 
