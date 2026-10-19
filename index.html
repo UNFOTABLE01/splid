@@ -93,6 +93,7 @@ tailwind.config = {
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/htm@3.1.1/dist/htm.umd.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <script src="https://unpkg.com/mqtt@5/dist/mqtt.min.js"></script>
 </head>
 
@@ -357,33 +358,218 @@ function aoasToWorkbook(a) {
   return wb;
 }
 
+/* styled workbook (ExcelJS) — brand theme: warm paper, rust/sage accents, colored headers,
+   zebra rows, category chips, Georgia display + Calibri body, tab colors, frozen headers */
+function styledTripWorkbook(a) {
+  const C = { ink:'FF26221B', paper:'FFF6F1E8', card:'FFFCF9F3', line:'FFE6DCC6', muted:'FF7D7463',
+    rust:'FFE14B4F', rustD:'FFB93539', rustT:'FFFDE9E9', sage:'FF2BB65E', sageD:'FF1D8A48', sageT:'FFDFF6E6', white:'FFFFFFFF' };
+  const hex = h => 'FF' + String(h).replace('#', '').toUpperCase();
+  const fill = c => ({ type:'pattern', pattern:'solid', fgColor:{ argb:c } });
+  const F = (size, o) => Object.assign({ name:'Calibri', size, color:{ argb:C.ink } }, o || {});
+  const LN = { style:'thin', color:{ argb:C.line } };
+  const BOX = { top:LN, left:LN, bottom:LN, right:LN };
+  const MONEY = '#,##0.00';
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'Splid'; wb.created = new Date();
+
+  /* sheet 1 — Summary */
+  const ws = wb.addWorksheet('Summary', { properties:{ tabColor:{ argb:C.ink } }, views:[{ showGridLines:false }],
+    columns:[{ width:30 }, { width:18 }, { width:18 }, { width:20 }, { width:13 }] });
+  a.summary.forEach(row => ws.addRow(row));
+  ws.getRow(1).height = 34; ws.getRow(2).height = 17; ws.getRow(3).height = 17;
+  ws.mergeCells('A1:E1'); ws.mergeCells('A2:E2'); ws.mergeCells('A3:E3');
+  for (let r = 1; r <= 3; r++) for (let c = 1; c <= 5; c++) ws.getCell(r, c).fill = fill(r === 1 ? C.ink : C.paper);
+  const ttl = ws.getCell('A1');
+  ttl.font = F(16, { name:'Georgia', bold:true, color:{ argb:C.white } });
+  ttl.alignment = { vertical:'middle', horizontal:'left', indent:1 };
+  ws.getCell('A2').font = F(9, { italic:true, color:{ argb:C.muted } });
+  ws.getCell('A2').alignment = { vertical:'middle', horizontal:'left', indent:1 };
+  ws.getCell('A3').font = F(9, { color:{ argb:C.muted } });
+  ws.getCell('A3').alignment = { vertical:'middle', horizontal:'left', indent:1 };
+  let z1 = 0, z1p = 0;
+  for (let r = 4; r <= ws.rowCount; r++) {
+    const row = ws.getRow(r); const k = String(row.getCell(1).value || '');
+    if (!k) continue;
+    if (k === 'TOTAL SPEND' || k === 'OPEN DEBTS (PAIRWISE)') {
+      row.height = 24;
+      try { ws.mergeCells('B' + r + ':C' + r); } catch (e2) {}
+      for (let c = 1; c <= 5; c++) { const cell = row.getCell(c); cell.fill = fill(C.card); cell.border = { bottom:LN }; }
+      row.getCell(1).font = F(10, { bold:true, color:{ argb:C.muted } });
+      row.getCell(1).alignment = { vertical:'middle' };
+      const v = row.getCell(2);
+      v.font = F(13, { name:'Georgia', bold:true, color:{ argb:k === 'TOTAL SPEND' ? C.rustD : C.sageD } });
+      v.alignment = { vertical:'middle', horizontal:'left', indent:1 };
+      v.border = { bottom:LN, left:{ style:'medium', color:{ argb:k === 'TOTAL SPEND' ? C.rust : C.sage } } };
+      if (typeof v.value === 'number') v.numFmt = MONEY;
+      continue;
+    }
+    if (k === 'MEMBER') {
+      row.height = 20;
+      for (let c = 1; c <= 5; c++) { const cell = row.getCell(c);
+        cell.fill = fill(C.rustD); cell.font = F(9, { bold:true, color:{ argb:C.white } });
+        cell.alignment = { vertical:'middle', horizontal:'center' }; cell.border = BOX; }
+      continue;
+    }
+    if (k === 'WHO OWES WHOM — SETTLE-UP PLAN') {
+      row.height = 22;
+      for (let c = 1; c <= 5; c++) { const cell = row.getCell(c); cell.fill = fill(C.sageT); cell.border = { bottom:LN }; }
+      row.getCell(1).font = F(11, { name:'Georgia', bold:true, color:{ argb:C.sageD } });
+      row.getCell(1).alignment = { vertical:'middle', indent:1 };
+      continue;
+    }
+    if (k === 'FROM') {
+      row.height = 20;
+      for (let c = 1; c <= 3; c++) { const cell = row.getCell(c);
+        cell.fill = fill(C.sageD); cell.font = F(9, { bold:true, color:{ argb:C.white } });
+        cell.alignment = { vertical:'middle', horizontal:'center' }; cell.border = BOX; }
+      continue;
+    }
+    if (k.indexOf('Everyone') === 0) {
+      row.getCell(1).font = F(10, { italic:true, bold:true, color:{ argb:C.sageD } });
+      row.getCell(1).alignment = { indent:1 };
+      continue;
+    }
+    const st = row.getCell(5).value;
+    if (typeof st === 'string' && /^(gets back|owes|settled)$/.test(st)) {
+      const zeb = (z1++ % 2) === 1; const net = row.getCell(4).value;
+      for (let c = 1; c <= 5; c++) { const cell = row.getCell(c);
+        cell.font = F(10); cell.border = BOX; if (zeb) cell.fill = fill(C.card); }
+      row.getCell(1).font = F(10, { bold:true });
+      row.getCell(1).alignment = { indent:1 };
+      for (const c of [2, 3, 4]) { const cell = row.getCell(c);
+        if (typeof cell.value === 'number') { cell.numFmt = MONEY; cell.alignment = { horizontal:'right' }; } }
+      row.getCell(4).font = F(10, { bold:true, color:{ argb: net > 0.005 ? C.sageD : net < -0.005 ? C.rustD : C.muted } });
+      const stat = row.getCell(5);
+      stat.font = F(9, { bold:true, italic:true, color:{ argb: st === 'gets back' ? C.sageD : st === 'owes' ? C.rustD : C.muted } });
+      stat.alignment = { horizontal:'center' };
+      continue;
+    }
+    if (typeof row.getCell(3).value === 'number') {
+      const zeb = (z1p++ % 2) === 1;
+      for (let c = 1; c <= 3; c++) { const cell = row.getCell(c);
+        cell.font = F(10); cell.border = BOX; if (zeb) cell.fill = fill(C.card); }
+      row.getCell(1).alignment = { indent:1 };
+      const v = row.getCell(3); v.numFmt = MONEY; v.font = F(10, { bold:true }); v.alignment = { horizontal:'right' };
+    }
+  }
+
+  /* sheet 2 — Expenses */
+  const ws2 = wb.addWorksheet('Expenses', { properties:{ tabColor:{ argb:C.rust } },
+    views:[{ state:'frozen', ySplit:1, showGridLines:false }],
+    columns:[{ width:13 }, { width:26 }, { width:11 }, { width:13 }, { width:14 }, { width:12 }, { width:52 }] });
+  a.expenseRows.forEach(row => ws2.addRow(row));
+  ws2.getRow(1).height = 20;
+  for (let c = 1; c <= 7; c++) { const cell = ws2.getRow(1).getCell(c);
+    cell.fill = fill(C.rustD); cell.font = F(9, { bold:true, color:{ argb:C.white } });
+    cell.alignment = { vertical:'middle', horizontal:'center' }; cell.border = BOX; }
+  const catByLabel = {};
+  Object.keys(CATS).forEach(k2 => { catByLabel[CATS[k2].label] = CATS[k2]; });
+  let z2 = 0;
+  for (let r = 2; r <= ws2.rowCount; r++) {
+    const row = ws2.getRow(r); const k = String(row.getCell(1).value || '');
+    if (!k) continue;
+    if (k === 'TOTAL') {
+      row.height = 22;
+      for (let c = 1; c <= 7; c++) { const cell = row.getCell(c);
+        cell.fill = fill(C.paper); cell.font = F(10, { bold:true });
+        cell.border = { top:{ style:'double', color:{ argb:C.rustD } }, left:LN, right:LN, bottom:LN }; }
+      row.getCell(1).alignment = { indent:1 };
+      const tv = row.getCell(5);
+      if (typeof tv.value === 'number') { tv.numFmt = MONEY; tv.alignment = { horizontal:'right' }; }
+      continue;
+    }
+    const zeb = (z2++ % 2) === 1;
+    row.height = 18;
+    for (let c = 1; c <= 7; c++) { const cell = row.getCell(c);
+      cell.font = F(10); cell.border = BOX; if (zeb) cell.fill = fill(C.card); }
+    row.getCell(1).font = F(9, { color:{ argb:C.muted } });
+    row.getCell(1).alignment = { horizontal:'center' };
+    row.getCell(2).font = F(10, { bold:true });
+    row.getCell(2).alignment = { indent:1 };
+    row.getCell(4).font = F(10, { color:{ argb:C.muted } });
+    row.getCell(6).font = F(9, { color:{ argb:C.muted } });
+    row.getCell(6).alignment = { horizontal:'center' };
+    row.getCell(7).font = F(9, { color:{ argb:C.muted } });
+    const cat = catByLabel[String(row.getCell(3).value || '')];
+    if (cat) { const cc = row.getCell(3);
+      cc.fill = fill(hex(cat.tint)); cc.font = F(9, { bold:true, color:{ argb:hex(cat.fg) } });
+      cc.alignment = { vertical:'middle', horizontal:'center' }; }
+    const av = row.getCell(5);
+    if (typeof av.value === 'number') { av.numFmt = MONEY; av.font = F(10, { bold:true }); av.alignment = { horizontal:'right' }; }
+  }
+
+  /* sheet 3 — Settlements */
+  const ws3 = wb.addWorksheet('Settlements', { properties:{ tabColor:{ argb:C.sage } },
+    views:[{ state:'frozen', ySplit:1, showGridLines:false }],
+    columns:[{ width:13 }, { width:16 }, { width:17 }, { width:14 }, { width:10 }] });
+  a.settleRows.forEach(row => ws3.addRow(row));
+  ws3.getRow(1).height = 20;
+  for (let c = 1; c <= 5; c++) { const cell = ws3.getRow(1).getCell(c);
+    cell.fill = fill(C.sageD); cell.font = F(9, { bold:true, color:{ argb:C.white } });
+    cell.alignment = { vertical:'middle', horizontal:'center' }; cell.border = BOX; }
+  let z3 = 0;
+  for (let r = 2; r <= ws3.rowCount; r++) {
+    const row = ws3.getRow(r);
+    if (typeof row.getCell(4).value !== 'number') {
+      if (row.getCell(1).value) { row.getCell(1).font = F(10, { italic:true, color:{ argb:C.muted } }); row.getCell(1).alignment = { indent:1 }; }
+      continue;
+    }
+    const zeb = (z3++ % 2) === 1; row.height = 18;
+    for (let c = 1; c <= 5; c++) { const cell = row.getCell(c);
+      cell.font = F(10); cell.border = BOX; if (zeb) cell.fill = fill(C.card); }
+    row.getCell(1).font = F(9, { color:{ argb:C.muted } });
+    row.getCell(1).alignment = { horizontal:'center' };
+    row.getCell(2).alignment = { indent:1 };
+    const av = row.getCell(4); av.numFmt = MONEY; av.font = F(10, { bold:true }); av.alignment = { horizontal:'right' };
+    const ty = row.getCell(5); const full = String(ty.value) === 'Full';
+    ty.fill = fill(full ? C.sageT : C.paper);
+    ty.font = F(9, { bold:true, color:{ argb: full ? C.sageD : C.muted } });
+    ty.alignment = { horizontal:'center' };
+  }
+  return wb;
+}
+
 function tripFileName(group, ext) {
   const safe = (group.name || 'trip').trim().replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'trip';
   return safe + '-sheet-' + new Date().toISOString().slice(0, 10) + '.' + ext;
 }
 
-function downloadTripSheet(group, notify) {
+async function downloadTripSheet(group, notify) {
+  const a = buildTripAoas(group);
+  const n = group.expenses.length;
+  const okMsg = () => notify('Trip sheet downloaded · ' + (n === 1 ? '1 expense' : n + ' expenses'));
   try {
-    if (typeof XLSX === 'undefined') throw new Error('xlsx-missing');
-    XLSX.writeFile(aoasToWorkbook(buildTripAoas(group)), tripFileName(group, 'xlsx'));
-    const n = group.expenses.length;
-    notify('Trip sheet downloaded · ' + (n === 1 ? '1 expense' : n + ' expenses'));
+    /* 1 — styled xlsx via ExcelJS (colors + fonts) */
+    if (typeof ExcelJS === 'undefined') throw new Error('exceljs-missing');
+    const buf = await styledTripWorkbook(a).xlsx.writeBuffer();
+    const el = document.createElement('a');
+    el.href = URL.createObjectURL(new Blob([buf], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+    el.download = tripFileName(group, 'xlsx');
+    document.body.appendChild(el); el.click(); el.remove();
+    okMsg();
   } catch (err) {
     try {
-      const a = buildTripAoas(group);
-      const esc = v => { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
-      const lines = ['SUMMARY'];
-      a.summary.forEach(r => lines.push(r.map(esc).join(',')));
-      lines.push('', 'EXPENSES');
-      a.expenseRows.forEach(r => lines.push(r.map(esc).join(',')));
-      lines.push('', 'SETTLEMENTS');
-      a.settleRows.forEach(r => lines.push(r.map(esc).join(',')));
-      const el = document.createElement('a');
-      el.href = URL.createObjectURL(new Blob(['\uFEFF' + lines.join('\r\n')], { type:'text/csv;charset=utf-8' }));
-      el.download = tripFileName(group, 'csv');
-      document.body.appendChild(el); el.click(); el.remove();
-      notify('Saved as CSV — Excel export needs internet once');
-    } catch (err2) { notify('Could not build the sheet'); }
+      /* 2 — plain xlsx via SheetJS if ExcelJS didn't load */
+      if (typeof XLSX === 'undefined') throw new Error('xlsx-missing');
+      XLSX.writeFile(aoasToWorkbook(a), tripFileName(group, 'xlsx'));
+      okMsg();
+    } catch (err2) {
+      try {
+        /* 3 — CSV last resort */
+        const esc = v => { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+        const lines = ['SUMMARY'];
+        a.summary.forEach(r => lines.push(r.map(esc).join(',')));
+        lines.push('', 'EXPENSES');
+        a.expenseRows.forEach(r => lines.push(r.map(esc).join(',')));
+        lines.push('', 'SETTLEMENTS');
+        a.settleRows.forEach(r => lines.push(r.map(esc).join(',')));
+        const el = document.createElement('a');
+        el.href = URL.createObjectURL(new Blob(['\uFEFF' + lines.join('\r\n')], { type:'text/csv;charset=utf-8' }));
+        el.download = tripFileName(group, 'csv');
+        document.body.appendChild(el); el.click(); el.remove();
+        notify('Saved as CSV — Excel export needs internet once');
+      } catch (err3) { notify('Could not build the sheet'); }
+    }
   }
 }
 
@@ -426,21 +612,19 @@ const cTopic = (...p) => CHAT_ROOT + p.join('/');
 const normId = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 const newChatId = () => Array.from({ length: 8 }, () => CODE_ABC[Math.floor(Math.random() * CODE_ABC.length)]).join('');
 
-/* suggest an ID grown from the chosen name — "Meera" → MEERA4821, ITSMEE77, MEECHAT2104 … */
+/* any ID from 3 to 14 letters/numbers works — shorter or longer than 8, it registers as-is and
+   friends can find & request it. What you type is exactly what you get: no padding, no forced length. */
+/* dice: a random ID grown from the chosen name — "Meera" → MEE482, ITSME7739, MECHAT42 … */
 const idFromName = nm => {
-  const base = normId(nm).slice(0, 10);
+  const base = normId(nm);
   if (base.length < 2) return newChatId();
-  const tail = () => String(10 + Math.floor(Math.random() * 90));
-  const big = () => String(1000 + Math.floor(Math.random() * 9000));
+  const digs = n => Array.from({ length: n }, () => String(Math.floor(Math.random() * 10))).join('');
   const pats = [
-    () => base + big(),
-    () => base + tail(),
-    () => base.slice(0, 6) + tail() + 'X',
-    () => 'ITS' + base.slice(0, 7) + tail(),
-    () => base.slice(0, 4) + 'CHAT' + big(),
-    () => base.slice(0, 5) + big(),
+    () => base.slice(0, 3 + Math.floor(Math.random() * 3)) + digs(2 + Math.floor(Math.random() * 3)),          /* MEE + a few digits */
+    () => 'ITS' + base.slice(0, 2 + Math.floor(Math.random() * 2)) + digs(2 + Math.floor(Math.random() * 3)),  /* ITSME + digits */
+    () => base.slice(0, 2) + 'CHAT' + digs(1 + Math.floor(Math.random() * 3)),                                 /* MECHAT + digits */
   ];
-  return pats[Math.floor(Math.random() * pats.length)]().slice(0, 14);
+  return pats[Math.floor(Math.random() * pats.length)]();
 };
 const freshChat = () => ({ me: null, friends: {}, reqsIn: {}, reqsOut: {}, threads: {}, unread: {}, seenUpto: {} });
 
@@ -1986,7 +2170,8 @@ function ChatOnboard({ onCreate, onSignIn }) {
   /* IDs this device already knows — one tap prefills the sign-in form */
   const [known] = useState(() => Object.values(vaultAll()).filter(e => e && e.id && e.salt && e.hash).sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0)).slice(0, 4));
 
-  const idOk = idv.length >= 3 && idv.length <= 14;
+  const targetId = normId(idv);        /* exactly what you type — any length from 3 to 14, no padding */
+  const idOk = targetId.length >= 3 && targetId.length <= 14;
   const passOk = pass.length >= 4;
   const passMatch = pass === pass2;
 
@@ -1995,24 +2180,24 @@ function ChatOnboard({ onCreate, onSignIn }) {
     let live = true;
     setChk('checking');
     const t = setTimeout(async () => {
-      const v0 = vaultGet(idv);            /* the device remembers — no network needed to know it's taken */
+      const v0 = vaultGet(targetId);       /* the device remembers — no network needed to know it's taken */
       if (v0 && v0.salt && v0.hash) { if (live) setChk('yours'); return; }
-      const p = await fetchChatProfile(idv);
+      const p = await fetchChatProfile(targetId);
       if (live) setChk(p ? 'taken' : 'free');
     }, 600);
     return () => { live = false; clearTimeout(t); };
-  }, [idv, tab]);
+  }, [targetId, tab]);
 
   const canCreate = name.trim().length >= 1 && idOk && chk !== 'checking' && chk !== 'taken' && chk !== 'yours' && passOk && passMatch && !busy;
 
   const create = async () => {
     if (!canCreate) return;
     setBusy(true); setErr(null);
-    const res = await onCreate({ name, id: idv, color, pic, password: pass });
+    const res = await onCreate({ name, id: targetId, color, pic, password: pass });
     if (res && res.taken) setChk('taken');
     if (res && res.takenLocal) {   /* this device already holds that ID — send them to sign in instead */
-      setTab('signin'); setInId(idv); setPass(''); setPass2('');
-      setErr('You already made ' + chunkCode(normId(idv)) + ' on this device — type its password to sign in.');
+      setTab('signin'); setInId(targetId); setPass(''); setPass2('');
+      setErr('You already made ' + chunkCode(targetId) + ' on this device — type its password to sign in.');
     }
     setBusy(false);
   };
@@ -2066,7 +2251,7 @@ function ChatOnboard({ onCreate, onSignIn }) {
       <div className="mt-4">
         <label className="lbl">Your ID</label>
         <div className="flex gap-2">
-          <input className="inp font-mono font-bold tracking-[.14em] uppercase text-[16px] select-all" placeholder="PICK-ANY-NAME" spellCheck=${false}
+          <input className="inp font-mono font-bold tracking-[.14em] uppercase text-[16px] select-all" placeholder="PICK-ANY-ID" spellCheck=${false}
             maxLength=${14} value=${idv} onChange=${e => setIdv(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}/>
           <button onClick=${() => setIdv(idFromName(name))} title="Randomize an ID from your name" aria-label="Randomize an ID from your name"
             className="shrink-0 w-11 rounded-xl bg-paper border border-line text-muted hover:text-ink hover:border-muted flex items-center justify-center transition active:scale-95">
@@ -2074,12 +2259,12 @@ function ChatOnboard({ onCreate, onSignIn }) {
           </button>
         </div>
         <div className="mt-2 text-[12px] font-semibold flex items-center gap-1.5 min-h-[18px]">
-          ${chk === 'checking' && html`<span className="w-1.5 h-1.5 rounded-full bg-sage live-dot"></span><span className="text-muted">Checking if it’s free…</span>`}
-          ${chk === 'free' && idOk && html`<span className="w-1.5 h-1.5 rounded-full bg-sage"></span><span className="text-sage-deep">${chunkCode(idv)} is free — grab it!</span>`}
-          ${chk === 'taken' && html`<span className="w-1.5 h-1.5 rounded-full bg-rust"></span><span className="text-rust-deep">Already taken — try another</span>`}
+          ${chk === 'checking' && html`<span className="w-1.5 h-1.5 rounded-full bg-sage live-dot"></span><span className="text-muted">Checking ${chunkCode(targetId)}…</span>`}
+          ${chk === 'free' && idOk && html`<span className="w-1.5 h-1.5 rounded-full bg-sage"></span><span className="text-sage-deep">${chunkCode(targetId)} is free — grab it!</span>`}
+          ${chk === 'taken' && html`<span className="w-1.5 h-1.5 rounded-full bg-rust"></span><span className="text-rust-deep">${chunkCode(targetId)} is already taken — try another</span>`}
           ${chk === 'yours' && html`<span className="w-1.5 h-1.5 rounded-full bg-sage"></span><span className="text-sage-deep">That one’s yours — it’s saved on this device.</span>
-            <button onClick=${() => { setTab('signin'); setInId(idv); setErr(null); }} className="underline underline-offset-2 text-ink hover:text-ink/80 transition">Sign in instead</button>`}
-          ${chk === 'idle' && html`<span className="text-muted">3–14 letters & numbers · the dice builds an ID from your name</span>`}
+            <button onClick=${() => { setTab('signin'); setInId(targetId); setErr(null); }} className="underline underline-offset-2 text-ink hover:text-ink/80 transition">Sign in instead</button>`}
+          ${chk === 'idle' && html`<span className="text-muted">3–14 letters or numbers — short or long, your call · the dice builds one from your name</span>`}
         </div>
       </div>
 
@@ -2104,7 +2289,7 @@ function ChatOnboard({ onCreate, onSignIn }) {
           (canCreate ? 'bg-ink text-paper hover:bg-ink/90' : 'bg-ink/20 text-paper cursor-not-allowed')}>
         ${busy ? 'Creating your ID…' : 'Create my ID'}
       </button>
-      <p className="text-[11px] text-muted mt-3 text-center leading-relaxed">Your ID is public so friends can find you. Your password is the key — it unlocks this account on any device, with friends & chats intact.</p>
+      <p className="text-[11px] text-muted mt-3 text-center leading-relaxed">Your ID is 3–14 letters or numbers — short or long, exactly as you type it — and public, so friends can find you. Your password is the key: it unlocks this account on any device, with friends & chats intact.</p>
       <button onClick=${() => { setTab('signin'); setErr(null); }} className="mt-2 w-full text-center text-[12.5px] font-semibold text-muted hover:text-ink transition py-1">
         Already have an ID? <span className="text-ink underline underline-offset-2">Sign in</span>
       </button>`
@@ -2302,7 +2487,7 @@ function AddFriendSheet({ onClose, onSend }) {
       <p className="text-[12.5px] text-muted leading-relaxed">Ask a friend for their Splid ID (they’ll find it inside Splid Chat). Paste it below — once they accept your request, you two can talk.</p>
       <div>
         <label className="lbl">Friend’s Splid ID</label>
-        <input className="inp font-mono tracking-[.16em] uppercase text-[15px]" placeholder="XXXX-XXXX" spellCheck=${false} maxLength=${18}
+        <input className="inp font-mono tracking-[.16em] uppercase text-[15px]" placeholder="THEIR-ID" spellCheck=${false} maxLength=${14}
           value=${val} onChange=${e => { setVal(e.target.value); setMsg(null); }}
           onKeyDown=${e => { if (e.key === 'Enter') submit(); }}/>
         ${clean && val !== clean && html`<p className="text-[11.5px] text-muted mt-1.5 numtab">Will send to ${chunkCode(clean)}</p>`}
@@ -3277,9 +3462,9 @@ function App() {
 
   /* ---- chat actions ---- */
   const createIdentity = async ({ name, id, color, pic, password }) => {
-    const clean = normId(id);
+    const clean = normId(id);               /* exactly what the user chose — 3–14 chars, short or long, no padding */
     const pw = String(password || '');
-    if (!name.trim() || clean.length < 3) return { taken: false };
+    if (!name.trim() || clean.length < 3 || clean.length > 14) return { taken: false };
     if (pw.length < 4) return { taken: false, weak: true };
     const existing = await fetchChatProfile(clean);
     if (existing) return { taken: true };
