@@ -1103,11 +1103,15 @@ const CREATOR_FILE_MAX = 100 * 1024;   /* 100 KB raw → ~137 KB base64, safe in
 const CREATOR_TEXT_MAX = 600;
 const CREATOR_TOPIC = cTopic('creator', 'msg');
 
-/* ---------------- owner HQ · DEVANSHU sees every ID & speaks to all of them ----------------
+/* ---------------- owner HQ · DEVANSHU sees every ID, speaks to all of them & can remove any ----------------
    Directory: every device keeps ONE tiny retained entry at splidchat/v1/dir/<ID> (ID, name, color,
    picture, joined, last-seen, friends count — NEVER passwords or chats). Subscribing to the wildcard
    splidchat/v1/dir/+ lists every registered ID. A broadcast is one retained message on
-   splidchat/v1/broadcast that lands on every signed-in Splid app until the owner clears it. */
+   splidchat/v1/broadcast that lands on every signed-in Splid app until the owner clears it.
+   Removal: the owner wipes an ID's retained profile / state / presence / directory beacon / inbox and
+   leaves a retained tombstone at splidchat/v1/removed/<ID>. Every device watches its own tombstone —
+   when it lands, the removed account wipes its local keyring, cleans up anything it republished and
+   signs out. The ID stays unusable until the owner clears the tombstone (Restore). */
 const OWNER_ID = CREATOR_ID;
 const DIR_TOPIC = id => cTopic('dir', normId(id));
 const DIR_WILD = cTopic('dir', '+');
@@ -1115,6 +1119,8 @@ const BROADCAST_TOPIC = cTopic('broadcast');
 const BROADCAST_TEXT_MAX = 600;
 const DIR_ONLINE_MS = 150000;                 /* an entry older than 2.5 min counts as gone quiet */
 const BC_SEEN_KEY = 'hisaab.chat.bseen';      /* per-user "already read" marker for announcements */
+const REMOVED_TOPIC = id => cTopic('removed', normId(id));   /* owner removal tombstones */
+const REMOVED_WILD = cTopic('removed', '+');
 
 const fileToB64 = file => new Promise((resolve, reject) => {
   const r = new FileReader();
@@ -1271,12 +1277,13 @@ function CreatorBox({ me, chatOn, publish }) {
 
 /* ---------------- Owner HQ · DEVANSHU's control room: every ID on Splid + a broadcast channel ---------------- */
 
-function OwnerHQ({ me, chatOn, dir, bc, publish, onRescan, friends, reqsOut, reqsIn, onAddFriend, onAccept, onDM, notify }) {
+function OwnerHQ({ me, chatOn, dir, bc, publish, onRescan, friends, reqsOut, reqsIn, onAddFriend, onAccept, onDM, notify, removed, onRemove, onRestore }) {
   const [text, setText] = useState('');
   const [file, setFile] = useState(null);
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
   const [rmArm, setRmArm] = useState(0);
+  const [rmRow, setRmRow] = useState(null);   /* { id, at } — two-tap confirm for removing an ID */
   const [scan, setScan] = useState('idle');   /* idle | scanning */
   const [q, setQ] = useState('');
   const [, setTick] = useState(0);            /* keeps "last seen" labels fresh */
@@ -1289,15 +1296,18 @@ function OwnerHQ({ me, chatOn, dir, bc, publish, onRescan, friends, reqsOut, req
     return () => { live = false; clearInterval(iv); };
   }, []);
 
+  const removedMap = removed || {};
   const entries = Object.values(dir || {})
-    .filter(d => d && d.id)
+    .filter(d => d && d.id && !removedMap[normId(d.id)])
     .filter(d => {
       const s = q.trim().toLowerCase();
       if (!s) return true;
       return (d.name || '').toLowerCase().indexOf(s) >= 0 || d.id.indexOf(normId(s)) >= 0;
     })
     .sort((a, b) => (onlineNow(b) ? 1 : 0) - (onlineNow(a) ? 1 : 0) || (b.at || 0) - (a.at || 0) || (a.name || '').localeCompare(b.name || ''));
-  const onlineCount = Object.values(dir || {}).filter(onlineNow).length;
+  const liveIds = Object.values(dir || {}).filter(d => d && d.id && !removedMap[normId(d.id)]);
+  const idCount = liveIds.length;
+  const onlineCount = liveIds.filter(onlineNow).length;
   const myId = normId(me && me.id);
 
   const pickFile = e => {
@@ -1352,7 +1362,7 @@ function OwnerHQ({ me, chatOn, dir, bc, publish, onRescan, friends, reqsOut, req
       <div className="p-5">
 
         <div className="flex items-center gap-2.5 flex-wrap">
-          <span className="rounded-full bg-sage-tint text-sage-deep text-[11px] font-bold tracking-[.1em] uppercase px-3 py-1.5 numtab">${Object.keys(dir || {}).length} ids on splid</span>
+          <span className="rounded-full bg-sage-tint text-sage-deep text-[11px] font-bold tracking-[.1em] uppercase px-3 py-1.5 numtab">${idCount} ids on splid</span>
           <span className="rounded-full bg-sage-tint text-sage-deep text-[11px] font-bold tracking-[.1em] uppercase px-3 py-1.5 numtab inline-flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-sage live-dot"></span>${onlineCount} online now</span>
           <button onClick=${doRescan} disabled=${scan === 'scanning'}
             className="ml-auto rounded-full border border-line bg-paper px-3.5 py-1.5 text-[12px] font-semibold inline-flex items-center gap-1.5 hover:border-muted transition active:scale-95 disabled:opacity-60">
@@ -1414,16 +1424,41 @@ function OwnerHQ({ me, chatOn, dir, bc, publish, onRescan, friends, reqsOut, req
                     <span className=${'w-1.5 h-1.5 rounded-full ' + (onlineNow(d) ? 'bg-sage live-dot' : 'bg-muted/50')}></span>${onlineNow(d) ? 'online now' : d.at ? 'last seen ' + ago(d.at) : 'last seen long ago'}
                   </div>
                 </div>
-                ${isMe ? null
-                  : isFriend ? html`<button onClick=${() => onDM(d.id)} className="shrink-0 rounded-full bg-ink text-paper text-[12.5px] font-semibold px-3.5 py-2 hover:bg-ink/90 active:scale-95 transition inline-flex items-center gap-1.5"><${Icon} name="chat" size=${13}/>Chat</button>`
-                  : incoming ? html`<button onClick=${() => onAccept(incoming.reqId)} className="shrink-0 rounded-full bg-sage text-paper text-[12.5px] font-semibold px-3.5 py-2 hover:bg-sage-deep active:scale-95 transition">Accept</button>`
-                  : pending ? html`<span className="shrink-0 text-[12px] font-semibold text-muted numtab">Pending</span>`
-                  : html`<button onClick=${() => onAddFriend(d.id)} className="shrink-0 rounded-full border border-line bg-card text-[12.5px] font-semibold px-3.5 py-2 hover:border-muted active:scale-95 transition inline-flex items-center gap-1.5"><${Icon} name="userPlus" size=${13}/>Add</button>`}
+                ${isMe ? null : html`<div className="shrink-0 flex items-center gap-1.5">
+                  ${isFriend ? html`<button onClick=${() => onDM(d.id)} className="rounded-full bg-ink text-paper text-[12.5px] font-semibold px-3.5 py-2 hover:bg-ink/90 active:scale-95 transition inline-flex items-center gap-1.5"><${Icon} name="chat" size=${13}/>Chat</button>`
+                  : incoming ? html`<button onClick=${() => onAccept(incoming.reqId)} className="rounded-full bg-sage text-paper text-[12.5px] font-semibold px-3.5 py-2 hover:bg-sage-deep active:scale-95 transition">Accept</button>`
+                  : pending ? html`<span className="text-[12px] font-semibold text-muted numtab">Pending</span>`
+                  : html`<button onClick=${() => onAddFriend(d.id)} className="rounded-full border border-line bg-card text-[12.5px] font-semibold px-3.5 py-2 hover:border-muted active:scale-95 transition inline-flex items-center gap-1.5"><${Icon} name="userPlus" size=${13}/>Add</button>`}
+                  ${(() => {
+                    const armed = !!rmRow && rmRow.id === d.id && Date.now() - rmRow.at < 3000;
+                    return html`<button onClick=${() => { if (armed) { setRmRow(null); onRemove(d.id); } else setRmRow({ id: d.id, at: Date.now() }); }}
+                      aria-label="Remove this ID from Splid"
+                      className=${'rounded-full border px-3 py-2 text-[12px] font-semibold transition active:scale-95 inline-flex items-center gap-1 ' +
+                        (armed ? 'bg-rust text-paper border-rust hover:bg-rust-deep' : 'border-rust/30 text-rust-deep hover:bg-rust-tint')}>
+                      <${Icon} name="trash" size=${12} sw=${2.2}/>${armed ? 'Sure?' : 'Remove'}
+                    </button>`;
+                  })()}
+                </div>`}
               </div>`;
             })}
           </div>
-          <p className="text-[11px] text-muted/70 mt-3 leading-relaxed">The directory is the public face of Splid — ID, name, color, picture, joined date, friends count and last-seen, the same info the network already shares for adding friends. Passwords, requests and chats never leave their owners.</p>
+          <p className="text-[11px] text-muted/70 mt-3 leading-relaxed">The directory is the public face of Splid — ID, name, color, picture, joined date, friends count and last-seen, the same info the network already shares for adding friends. Passwords, requests and chats never leave their owners. As the owner you can remove any ID here — that erases its account from the whole network.</p>
         </div>
+
+        ${Object.keys(removedMap).length > 0 && html`<div className="mt-5 pt-4 border-t border-line">
+          <div className="text-[10.5px] font-bold tracking-[.16em] uppercase text-muted mb-2.5 flex items-center gap-1.5"><${Icon} name="trash" size=${11} sw=${2.4}/>Removed IDs</div>
+          <div className="space-y-2">
+            ${Object.values(removedMap).sort((a, b) => (b.ts || 0) - (a.ts || 0)).map(d => html`<div key=${d.id} className="rounded-2xl border border-rust/25 bg-rust-tint/40 px-3.5 py-3 flex items-center gap-3">
+              <span className="w-9 h-9 rounded-full bg-rust/15 text-rust-deep flex items-center justify-center shrink-0"><${Icon} name="trash" size=${14} sw=${2.2}/></span>
+              <div className="flex-1 min-w-0">
+                <div className="text-[13.5px] font-semibold numtab">${chunkCode(d.id)}</div>
+                <div className="text-[11.5px] text-muted numtab truncate">${(d.name ? d.name + ' · ' : '') + 'removed ' + (d.ts ? dayStamp(d.ts) : '')}</div>
+              </div>
+              <button onClick=${() => onRestore(d.id)} className="shrink-0 rounded-full border border-line bg-card text-[12.5px] font-semibold px-3.5 py-2 hover:border-muted active:scale-95 transition inline-flex items-center gap-1.5"><${Icon} name="replay" size=${13} sw=${2.2}/>Restore</button>
+            </div>`)}
+          </div>
+          <p className="text-[11px] text-muted/70 mt-3 leading-relaxed">Removing an ID wiped its profile, cloud state and inbox everywhere and signed its devices out. Restore only frees the ID for a fresh start — old data can’t come back.</p>
+        </div>`}
 
         ${err && html`<p className="mt-3 rounded-2xl px-3.5 py-2.5 text-[12.5px] font-semibold leading-relaxed bg-rust-tint text-rust-deep border border-rust/25">${err}</p>`}
         ${!chatOn && html`<p className="mt-2 text-[11.5px] font-semibold text-rust-deep">Chat network is offline — open Splid Chat once to connect; Rescan works anyway.</p>`}
@@ -2480,6 +2515,7 @@ const SIGNIN_ERRS = {
   notfound: 'We couldn’t find that ID on the chat network right now. Check the spelling — if the ID was created on another device, the network may be slow to sync, so try again in a moment.',
   nopass: 'This ID was made before passwords existed, so it can’t be verified on a new device.',
   wrongpass: 'Wrong password for that ID — try again.',
+  removed: 'The owner removed this Splid ID — it can no longer be used.',
   bad: 'Enter your ID (3–14 letters or numbers) and your password.',
   offline: 'Couldn’t reach the chat network — check your internet and try again.',
   try: 'Sign-in failed — check your connection and try again.',
@@ -2545,18 +2581,22 @@ function ChatOnboard({ onCreate, onSignIn }) {
       const v0 = vaultGet(targetId);       /* the device remembers — no network needed to know it's taken */
       if (v0 && v0.salt && v0.hash) { if (live) setChk('yours'); return; }
       const p = await fetchChatProfile(targetId);
-      if (live) setChk(p ? 'taken' : 'free');
+      if (!live) return;
+      if (p) { setChk('taken'); return; }
+      const tomb = await pullRetained(REMOVED_TOPIC(targetId), d => d && d.app === 'splidchat' && d.type === 'removed' && d.id === targetId, { timeout: 3200, fastMs: 1600 });
+      if (live) setChk(tomb && tomb.data ? 'removed' : 'free');   /* profile gone but tombstone retained → the owner removed it */
     }, 600);
     return () => { live = false; clearTimeout(t); };
   }, [targetId, tab]);
 
-  const canCreate = name.trim().length >= 1 && idOk && chk !== 'checking' && chk !== 'taken' && chk !== 'yours' && passOk && passMatch && !busy;
+  const canCreate = name.trim().length >= 1 && idOk && chk !== 'checking' && chk !== 'taken' && chk !== 'yours' && chk !== 'removed' && passOk && passMatch && !busy;
 
   const create = async () => {
     if (!canCreate) return;
     setBusy(true); setErr(null);
     const res = await onCreate({ name, id: targetId, color, pic, password: pass });
     if (res && res.taken) setChk('taken');
+    if (res && res.removedId) setErr('The owner removed ' + chunkCode(targetId) + ' from Splid — this ID stays unusable until the owner restores it.');
     if (res && res.takenLocal) {   /* this device already holds that ID — send them to sign in instead */
       setTab('signin'); setInId(targetId); setPass(''); setPass2('');
       setErr('You already made ' + chunkCode(targetId) + ' on this device — type its password to sign in.');
@@ -2624,6 +2664,7 @@ function ChatOnboard({ onCreate, onSignIn }) {
           ${chk === 'checking' && html`<span className="w-1.5 h-1.5 rounded-full bg-sage live-dot"></span><span className="text-muted">Checking ${chunkCode(targetId)}…</span>`}
           ${chk === 'free' && idOk && html`<span className="w-1.5 h-1.5 rounded-full bg-sage"></span><span className="text-sage-deep">${chunkCode(targetId)} is free — grab it!</span>`}
           ${chk === 'taken' && html`<span className="w-1.5 h-1.5 rounded-full bg-rust"></span><span className="text-rust-deep">${chunkCode(targetId)} is already taken — try another</span>`}
+          ${chk === 'removed' && html`<span className="w-1.5 h-1.5 rounded-full bg-rust"></span><span className="text-rust-deep">${chunkCode(targetId)} was removed by the owner — it stays unusable until they restore it.</span>`}
           ${chk === 'yours' && html`<span className="w-1.5 h-1.5 rounded-full bg-sage"></span><span className="text-sage-deep">That one’s yours — it’s saved on this device.</span>
             <button onClick=${() => { setTab('signin'); setInId(targetId); setErr(null); }} className="underline underline-offset-2 text-ink hover:text-ink/80 transition">Sign in instead</button>`}
           ${chk === 'idle' && html`<span className="text-muted">3–14 letters or numbers — short or long, your call · the dice builds one from your name</span>`}
@@ -2646,6 +2687,7 @@ function ChatOnboard({ onCreate, onSignIn }) {
         ${pass2 && !passMatch && html`<div className="mt-2 text-[12px] font-semibold text-rust-deep">Passwords don’t match yet</div>`}
       </div>
 
+      ${err && html`<div className="mt-3 rounded-2xl px-3.5 py-2.5 text-[12.5px] font-semibold leading-relaxed bg-rust-tint text-rust-deep border border-rust/25">${err}</div>`}
       <button onClick=${create} disabled=${!canCreate}
         className=${'mt-6 w-full rounded-full py-3 text-[14px] font-semibold transition active:scale-[.98] ' +
           (canCreate ? 'bg-ink text-paper hover:bg-ink/90' : 'bg-ink/20 text-paper cursor-not-allowed')}>
@@ -3393,11 +3435,13 @@ function App() {
   const [chatOn, setChatOn] = useState(false);
   const [chatDir, setChatDir] = useState({});   /* owner HQ: every dir entry on the network, id → entry */
   const [chatBc, setChatBc] = useState(null);   /* the owner's live broadcast, if any */
+  const [chatRemoved, setChatRemoved] = useState({}); /* owner HQ: removal tombstones seen on the network, id → payload */
   const [bcSeen, setBcSeen] = useState(() => { try { return localStorage.getItem(BC_SEEN_KEY) || ''; } catch (e) { return ''; } });
   const [presence, setPresence] = useState({});
   const [typing, setTyping] = useState({});
   const chatClientRef = useRef(null);
   const chatSubsRef = useRef(new Set());
+  const removedIdsRef = useRef(new Set());      /* IDs known to be removed by the owner — this device never re-announces them */
   const chatRef = useRef(chat); chatRef.current = chat;
   const chatOpenRef = useRef(false); chatOpenRef.current = chatOpen;
   const chatThreadRef = useRef(null); chatThreadRef.current = chatView === 'home' ? null : chatView;
@@ -3416,6 +3460,7 @@ function App() {
      Carries NO passwords, requests or chats — only what add-friend already shares publicly. */
   const dirPublish = on => {
     const me = chatRef.current.me; if (!me) return;
+    if (removedIdsRef.current.has(normId(me.id))) return;   /* removed by the owner — never re-beacon */
     let joined = me.joinedAt;
     if (!joined) {
       const v = vaultGet(me.id);
@@ -3437,6 +3482,38 @@ function App() {
       const msg = { bad: 'That ID looks wrong', offline: 'Chat network is offline', self: "That's you", already: 'Already friends', pending: 'Request already pending', incoming: 'They already requested you — check Requests', notfound: 'No Splid profile found for that ID' }[e] || 'Could not send the request';
       showToast(msg, 'x');
     }
+  };
+
+  /* owner power: remove a Splid ID from the whole network — wipes its retained identity, cloud snapshot,
+     presence, directory beacon and inbox, then leaves a retained tombstone so every device (including
+     theirs) learns the account is gone. The ID stays unusable until the owner restores it. */
+  const ownerRemoveId = id => {
+    const me = chatRef.current.me; const clean = normId(id);
+    if (!me || normId(me.id) !== CREATOR_ID || !clean) return;
+    if (clean === normId(me.id)) { showToast('The owner ID cannot remove itself', 'x'); return; }
+    if (!chatPublish(REMOVED_TOPIC(clean), { app: 'splidchat', type: 'removed', id: clean, by: me.id, name: (chatDir[clean] && chatDir[clean].name) || '', ts: Date.now() }, true)) {
+      showToast('Chat network is offline — connect first, then remove', 'x'); return;
+    }
+    chatPublish(cTopic('profile', clean), null, true);   /* identity + password proof gone network-wide */
+    chatPublish(cTopic('state', clean), null, true);     /* cloud snapshot gone */
+    chatPublish(cTopic('presence', clean), '', true);
+    chatPublish(DIR_TOPIC(clean), null, true);           /* the directory forgets this ID */
+    try {                                                 /* sweep every retained message left in their inbox */
+      const w = mqtt.connect(MQTT_URL, { clientId: 'splidr-' + uid(), keepalive: 10, reconnectPeriod: 0, connectTimeout: 6000 });
+      const root = cTopic('inbox', clean, '');
+      w.on('connect', () => { try { w.subscribe(root + '#', { qos: 0 }); } catch (e) {} });
+      w.on('message', t => { if (t.indexOf(root) === 0) { try { w.publish(t, '', { qos: 0, retain: true }); } catch (e) {} } });
+      setTimeout(() => { try { w.end(true); } catch (e) {} }, 6000);
+    } catch (e) {}
+    setChatDir(p => { if (!p[clean]) return p; const n = { ...p }; delete n[clean]; return n; });
+    showToast(chunkCode(clean) + ' was removed from Splid', 'trash');
+  };
+  /* owner mercy: clear a removal tombstone — the ID becomes creatable again (fresh start, old data stays gone) */
+  const ownerRestoreId = id => {
+    const clean = normId(id); if (!clean) return;
+    if (!chatPublish(REMOVED_TOPIC(clean), null, true)) { showToast('Chat network is offline — connect first', 'x'); return; }
+    setChatRemoved(p => { if (!p[clean]) return p; const n = { ...p }; delete n[clean]; return n; });
+    showToast(chunkCode(clean) + ' is free to register again', 'check');
   };
 
   /* ---- file attachments (bytes go P2P over WebRTC; MQTT carries only signals) ---- */
@@ -3648,10 +3725,34 @@ function App() {
     return () => clearInterval(iv);
   }, []);
 
+  /* this device's own ID was removed by the owner (tombstone landed): wipe the keyring, clean up
+     anything this device republished, and sign out for good */
+  const handleSelfRemoved = () => {
+    const me = chatRef.current.me;
+    const c = chatClientRef.current;
+    if (me) {
+      if (c) {
+        try { c.publish(cTopic('profile', me.id), '', { qos: 0, retain: true }); } catch (e) {}
+        try { c.publish(cTopic('state', me.id), '', { qos: 0, retain: true }); } catch (e) {}
+        try { c.publish(cTopic('presence', me.id), '', { qos: 0, retain: true }); } catch (e) {}
+        try { c.publish(DIR_TOPIC(me.id), '', { qos: 0, retain: true }); } catch (e) {}
+      }
+      vaultDrop(me.id);   /* the keyring forgets this ID — it can never sign in from here again */
+    }
+    if (c) { setTimeout(() => { try { c.end(true); } catch (e) {} }, 500); } /* let the cleanup publishes flush */
+    chatClientRef.current = null;
+    chatSubsRef.current = new Set();
+    setPresence({}); setTyping({}); setChatOn(false); setChatView('home');
+    restoreRef.current = false;
+    patchChat(() => freshChat());
+    showToast('The owner removed this Splid ID — you are signed out', 'trash');
+  };
+
   const onChatMsg = (topic, payload) => {
     const me = chatRef.current.me; if (!me) return;
     /* live handshake — another device is looking for MY id and the broker lost the retained copies: answer now */
     if (topic === cTopic('need', me.id)) {
+      if (removedIdsRef.current.has(me.id)) return;   /* a removed ID never answers identity pings */
       let d; try { d = JSON.parse(payload.toString()); } catch (e) { return; }
       if (!d || d.app !== 'splidchat' || d.type !== 'need' || normId(d.id) !== me.id) return;
       if (d.want === 'state') chatPublish(cTopic('state', me.id), { app:'splidchat', type:'state', v:1, state: vaultPickState(chatRef.current) }, false);
@@ -3802,6 +3903,21 @@ function App() {
       if (d && d.type === 'dir' && d.id === m[1]) setChatDir(p => ({ ...p, [d.id]: d }));
       return;
     }
+    m = topic.match(/^splidchat\/v1\/removed\/([A-Z0-9]+)$/);
+    if (m) {
+      const s = payload.toString();
+      if (!s) {   /* tombstone cleared — the owner restored the ID */
+        if (m[1] === me.id) removedIdsRef.current.delete(me.id);
+        setChatRemoved(p => { if (!p[m[1]]) return p; const n = { ...p }; delete n[m[1]]; return n; });
+        return;
+      }
+      let d; try { d = JSON.parse(s); } catch (e) { return; }
+      if (!d || d.app !== 'splidchat' || d.type !== 'removed' || normId(d.id) !== m[1]) return;
+      setChatRemoved(p => ({ ...p, [d.id]: d }));
+      setChatDir(p => { if (!p[d.id]) return p; const n = { ...p }; delete n[d.id]; return n; });
+      if (d.id === me.id && !removedIdsRef.current.has(me.id)) { removedIdsRef.current.add(me.id); handleSelfRemoved(); }
+      return;
+    }
     if (topic === BROADCAST_TOPIC) {
       const s = payload.toString();
       if (!s) { setChatBc(null); return; }
@@ -3828,13 +3944,16 @@ function App() {
       chatSubsRef.current.add(cTopic('inbox', me2.id, '#'));
       chatSubsRef.current.add(cTopic('need', me2.id)); /* live handshake listener — answers identity pings */
       chatSubsRef.current.add(cTopic('profile', me2.id));
+      chatSubsRef.current.add(cTopic('removed', me2.id)); /* our own tombstone — lands instantly if the owner removed this ID */
       chatSubsRef.current.add(BROADCAST_TOPIC);          /* owner announcements reach every signed-in app */
-      if (normId(me2.id) === CREATOR_ID) chatSubsRef.current.add(DIR_WILD); /* owner only: the live directory feed */
+      if (normId(me2.id) === CREATOR_ID) { chatSubsRef.current.add(DIR_WILD); chatSubsRef.current.add(REMOVED_WILD); } /* owner only: live directory + removal feeds */
       Object.keys(chatRef.current.friends || {}).forEach(f => { chatSubsRef.current.add(cTopic('presence', f)); chatSubsRef.current.add(cTopic('profile', f)); });
       chatSubsRef.current.forEach(t => { try { c.subscribe(t, { qos: 0 }); } catch (e) {} });
       chatPublish(cTopic('presence', me2.id), { app:'splidchat', on: 1, t: Date.now() }, true);
-      chatPublish(cTopic('profile', me2.id), { app:'splidchat', type:'profile', profile: { id: me2.id, name: me2.name, color: me2.color, pic: me2.pic || '', dev: me2.dev, salt: me2.salt, hash: me2.hash }, updatedAt: Date.now() }, true);
-      dirPublish(1);
+      if (!removedIdsRef.current.has(normId(me2.id))) {   /* a removed ID never re-announces its identity */
+        chatPublish(cTopic('profile', me2.id), { app:'splidchat', type:'profile', profile: { id: me2.id, name: me2.name, color: me2.color, pic: me2.pic || '', dev: me2.dev, salt: me2.salt, hash: me2.hash }, updatedAt: Date.now() }, true);
+        dirPublish(1);
+      }
     });
     c.on('close', () => setChatOn(false));
     c.on('error', () => {});
@@ -3926,6 +4045,8 @@ function App() {
     if (pw.length < 4) return { taken: false, weak: true };
     const existing = await fetchChatProfile(clean);
     if (existing) return { taken: true };
+    const tomb = await pullRetained(REMOVED_TOPIC(clean), d => d && d.app === 'splidchat' && d.type === 'removed' && d.id === clean, { timeout: 3200, fastMs: 1800 });
+    if (tomb && tomb.data) return { taken: false, removedId: true };   /* the owner removed this ID — unusable until restored */
     const v0 = vaultGet(clean);
     if (v0 && v0.salt && v0.hash) return { taken: false, takenLocal: true }; /* this device already owns that ID */
     const salt = uid() + uid();
@@ -3989,7 +4110,11 @@ function App() {
     step('lookup');
     const { src, srcKind, connected } = await lookupIdentity(clean, onStep);
     if (!connected) throw 'offline';          /* never reached any broker — don't claim the ID doesn't exist */
-    if (!src || !src.id) throw 'notfound';    /* reached the network, nothing retained anywhere */
+    if (!src || !src.id) {                    /* reached the network, nothing retained anywhere */
+      const tomb = await pullRetained(REMOVED_TOPIC(clean), d => d && d.app === 'splidchat' && d.type === 'removed' && d.id === clean, { timeout: 3400, fastMs: 2000 });
+      if (tomb && tomb.data) { vaultDrop(clean); throw 'removed'; }   /* the owner removed this ID */
+      throw 'notfound';
+    }
     if (!src.salt || !src.hash) throw 'nopass';
     step('verify');
     const h = await pwHash(src.salt, pw);
@@ -4314,6 +4439,7 @@ function App() {
     ${chat.me && normId(chat.me.id) === CREATOR_ID && html`<${OwnerHQ} me=${chat.me} chatOn=${chatOn} dir=${chatDir} bc=${chatBc}
       publish=${p => chatPublish(BROADCAST_TOPIC, p, true)}
       onRescan=${rescanDir}
+      removed=${chatRemoved} onRemove=${ownerRemoveId} onRestore=${ownerRestoreId}
       friends=${chat.friends || {}} reqsOut=${chat.reqsOut || {}} reqsIn=${chat.reqsIn || {}}
       onAddFriend=${ownerAddFriend} onAccept=${acceptReq}
       onDM=${id => { setChatView(id); setChatOpen(true); }}
