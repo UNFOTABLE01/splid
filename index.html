@@ -753,26 +753,53 @@ async function fetchChatState(id, timeout) {
   return r.data && r.data.state ? r.data.state : null;
 }
 
-/* owner directory scan — one-shot wildcard pull: subscribe splidchat/v1/dir/+ for a few seconds and
-   collect every retained entry (retained messages are delivered on subscribe), then merge into the
-   live map the owner's subscription keeps warm. */
+/* owner directory scan — one-shot wildcard sweep across BOTH brokers: subscribe splidchat/v1/dir/+ AND
+   splidchat/v1/profile/+ for a few seconds and collect every retained entry (retained messages are
+   delivered on subscribe). Dir beacons carry the rich info (joined, friends count, online flag) but only
+   exist for devices that have connected; retained profiles exist for EVERY ID ever registered on Splid —
+   offline right now or never-beaconed alike — so merging both makes the list the whole registry, not just
+   whoever happens to be online. Password proofs (salt/hash/dev) are stripped on sight, never surfaced. */
 function scanDir(timeout) {
   return new Promise(resolve => {
     if (typeof mqtt === 'undefined') { resolve({}); return; }
-    let c;
-    try { c = mqtt.connect(MQTT_URL, { clientId: 'splidd-' + uid(), keepalive: 20, reconnectPeriod: 0, connectTimeout: 6000 }); }
-    catch (e) { resolve({}); return; }
     const acc = {};
-    let done = false;
-    const finish = () => { if (done) return; done = true; clearTimeout(to); try { c.end(true); } catch (e) {} resolve(acc); };
-    const to = setTimeout(finish, timeout || 5000);
-    c.on('connect', () => { try { c.subscribe(DIR_WILD, { qos: 0 }); } catch (e) {} });
-    c.on('message', (t, payload) => {
-      const s = payload.toString(); if (!s) return;
-      const m = t.match(/^splidchat\/v1\/dir\/([A-Z0-9]+)$/); if (!m) return;
-      try { const d = JSON.parse(s); if (d && d.type === 'dir' && d.id === m[1]) acc[d.id] = d; } catch (e) {}
+    let pending = BROKERS.length;
+    const oneDone = () => { pending--; if (pending <= 0) resolve(acc); };
+    BROKERS.forEach(url => {
+      let c;
+      try { c = mqtt.connect(url, { clientId: 'splidd-' + uid(), keepalive: 20, reconnectPeriod: 0, connectTimeout: 6000 }); }
+      catch (e) { oneDone(); return; }
+      let done = false;
+      const finish = () => { if (done) return; done = true; clearTimeout(to); try { c.end(true); } catch (e) {} oneDone(); };
+      const to = setTimeout(finish, timeout || 5000);
+      c.on('connect', () => {
+        try { c.subscribe(DIR_WILD, { qos: 0 }); } catch (e) {}
+        try { c.subscribe(PROFILE_WILD, { qos: 0 }); } catch (e) {}
+      });
+      c.on('message', (t, payload) => {
+        const s = payload.toString(); if (!s) return;
+        let m = t.match(/^splidchat\/v1\/dir\/([A-Z0-9]+)$/);
+        if (m) {
+          try { const d = JSON.parse(s); if (d && d.type === 'dir' && d.id === m[1]) acc[d.id] = { ...(acc[d.id] || {}), ...d }; } catch (e) {}
+          return;
+        }
+        m = t.match(/^splidchat\/v1\/profile\/([A-Z0-9]+)$/);
+        if (m) {
+          try {
+            const d = JSON.parse(s); const p = d && d.profile;
+            if (p && p.id === m[1]) {
+              const prev = acc[p.id] || {};   /* dir beacon (richer) wins; profile only backfills */
+              acc[p.id] = { type: 'dir', id: p.id,
+                name: prev.name || p.name || '', color: prev.color || p.color || '',
+                pic: prev.pic !== undefined ? prev.pic : (p.pic || ''),
+                joined: prev.joined, fr: prev.fr, on: prev.on,
+                at: prev.at || d.updatedAt || 0 };
+            }
+          } catch (e) {}
+        }
+      });
+      c.on('error', () => finish());
     });
-    c.on('error', () => finish());
   });
 }
 
@@ -1115,6 +1142,7 @@ const CREATOR_TOPIC = cTopic('creator', 'msg');
 const OWNER_ID = CREATOR_ID;
 const DIR_TOPIC = id => cTopic('dir', normId(id));
 const DIR_WILD = cTopic('dir', '+');
+const PROFILE_WILD = cTopic('profile', '+');   /* owner sweep: every retained profile = every ID ever made */
 const BROADCAST_TOPIC = cTopic('broadcast');
 const BROADCAST_TEXT_MAX = 600;
 const DIR_ONLINE_MS = 150000;                 /* an entry older than 2.5 min counts as gone quiet */
@@ -1404,7 +1432,7 @@ function OwnerHQ({ me, chatOn, dir, bc, publish, onRescan, friends, reqsOut, req
         <div className="mt-5 pt-4 border-t border-line">
           <div className="text-[10.5px] font-bold tracking-[.16em] uppercase text-muted mb-2.5 flex items-center gap-1.5"><${Icon} name="users" size=${11} sw=${2.4}/>Every ID on Splid</div>
           <input className="inp mb-2.5" placeholder="Search name or ID…" value=${q} onChange=${e => setQ(e.target.value)} maxLength=${24}/>
-          ${entries.length === 0 && html`<div className="text-[13px] text-muted py-2 leading-relaxed">${scan === 'scanning' ? 'Scanning the network for IDs…' : 'No IDs found yet — they appear here as soon as devices come online. Hit Rescan.'}</div>`}
+          ${entries.length === 0 && html`<div className="text-[13px] text-muted py-2 leading-relaxed">${scan === 'scanning' ? 'Sweeping both brokers for every ID ever registered…' : 'No IDs found yet — hit Rescan to sweep the whole network, offline devices included.'}</div>`}
           <div className="space-y-2">
             ${entries.map(d => {
               const isMe = d.id === myId;
@@ -1419,7 +1447,7 @@ function OwnerHQ({ me, chatOn, dir, bc, publish, onRescan, friends, reqsOut, req
                     <span className="text-[14px] font-semibold truncate">${d.name || 'Unnamed'}</span>
                     ${isMe && html`<span className="shrink-0 text-[9.5px] font-bold tracking-[.12em] uppercase rounded-full bg-ink text-paper px-2 py-0.5">owner</span>`}
                   </div>
-                  <div className="text-[11.5px] text-muted numtab truncate">${chunkCode(d.id)} · ${fr} friend${fr === 1 ? '' : 's'} · joined ${d.joined ? dayStamp(d.joined) : '—'}</div>
+                  <div className="text-[11.5px] text-muted numtab truncate">${chunkCode(d.id)}${d.fr != null ? ' · ' + fr + ' friend' + (fr === 1 ? '' : 's') : ''} · joined ${d.joined ? dayStamp(d.joined) : '—'}</div>
                   <div className=${'text-[11px] numtab mt-0.5 inline-flex items-center gap-1.5 ' + (onlineNow(d) ? 'text-sage-deep font-semibold' : 'text-muted')}>
                     <span className=${'w-1.5 h-1.5 rounded-full ' + (onlineNow(d) ? 'bg-sage live-dot' : 'bg-muted/50')}></span>${onlineNow(d) ? 'online now' : d.at ? 'last seen ' + ago(d.at) : 'last seen long ago'}
                   </div>
@@ -1442,7 +1470,7 @@ function OwnerHQ({ me, chatOn, dir, bc, publish, onRescan, friends, reqsOut, req
               </div>`;
             })}
           </div>
-          <p className="text-[11px] text-muted/70 mt-3 leading-relaxed">The directory is the public face of Splid — ID, name, color, picture, joined date, friends count and last-seen, the same info the network already shares for adding friends. Passwords, requests and chats never leave their owners. As the owner you can remove any ID here — that erases its account from the whole network.</p>
+          <p className="text-[11px] text-muted/70 mt-3 leading-relaxed">The directory is the whole registry — every ID ever made on Splid, offline or not: ID, name, color, picture, joined date, friends count and last-seen, the same info the network already shares for adding friends. Passwords, requests and chats never leave their owners. As the owner you can remove any ID here — that erases its account from the whole network.</p>
         </div>
 
         ${Object.keys(removedMap).length > 0 && html`<div className="mt-5 pt-4 border-t border-line">
@@ -1469,7 +1497,7 @@ function OwnerHQ({ me, chatOn, dir, bc, publish, onRescan, friends, reqsOut, req
 
 /* ---------------- footer · GitHub link + credit ---------------- */
 
-const GITHUB_URL = 'https://github.com/zencrypton/splid';
+const GITHUB_URL = 'https://github.com/UNFOTABLE01/splid';
 
 function Footer() {
   return html`<footer className="mt-12 border-t border-line bg-card/60">
@@ -1480,13 +1508,13 @@ function Footer() {
         <span className="w-8 h-8 rounded-full bg-ink text-paper flex items-center justify-center transition-transform duration-200 group-hover:scale-110">
           <${Icon} name="github" size=${15} sw=${1.8}/>
         </span>
-        <span className="text-[13px] font-semibold">zencrypton<span className="text-muted font-normal">/splid</span></span>
+        <span className="text-[13px] font-semibold">UNFOTABLE01<span className="text-muted font-normal">/splid</span></span>
         <span className="text-muted transition-transform duration-200 group-hover:translate-x-0.5"><${Icon} name="arrR" size=${13}/></span>
       </a>
       <p className="text-[12px] text-muted leading-relaxed">
         Developed &amp; managed by
         <span className="inline-flex items-baseline align-[-2px] ml-2 rounded-md bg-ink px-2.5 py-[5px] shadow-soft">
-          <span className="font-display font-bold tracking-[.18em] text-[11.5px] leading-none text-paper uppercase">UNFTABLE</span>
+          <span className="font-display font-bold tracking-[.18em] text-[11.5px] leading-none text-paper uppercase">UNFOTABLE</span>
           <span className="ml-[3px] font-display font-bold text-[15px] leading-none text-[#3DDC5C]">.</span>
         </span>
       </p>
@@ -3886,13 +3914,27 @@ function App() {
       return;
     }
     m = topic.match(/^splidchat\/v1\/profile\/([A-Z0-9]+)$/);
-    if (m && chatRef.current.friends[m[1]] && payload.toString()) {
+    if (m && payload.toString()) {
       let d; try { d = JSON.parse(payload.toString()); } catch (e) { return; }
-      if (d && d.profile && d.profile.id) patchChat(c => {
-        const fr = { ...(c.friends || {}) }; const f = fr[d.profile.id]; if (!f) return c;
-        fr[d.profile.id] = { ...f, name: d.profile.name || f.name, color: d.profile.color || f.color, pic: d.profile.pic !== undefined ? (d.profile.pic || '') : (f.pic || '') };
-        return { ...c, friends: fr };
-      });
+      if (d && d.profile && d.profile.id) {
+        if (chatRef.current.friends[m[1]]) patchChat(c => {
+          const fr = { ...(c.friends || {}) }; const f = fr[d.profile.id]; if (!f) return c;
+          fr[d.profile.id] = { ...f, name: d.profile.name || f.name, color: d.profile.color || f.color, pic: d.profile.pic !== undefined ? (d.profile.pic || '') : (f.pic || '') };
+          return { ...c, friends: fr };
+        });
+        /* owner: every profile on the wire feeds the registry — offline and never-friended IDs included;
+           salt/hash/dev never make it into the directory map */
+        if (normId(me.id) === CREATOR_ID && m[1] !== normId(me.id)) {
+          setChatDir(p => {
+            const prev = p[d.profile.id] || {};
+            return { ...p, [d.profile.id]: { type: 'dir', id: d.profile.id,
+              name: prev.name || d.profile.name || '', color: prev.color || d.profile.color || '',
+              pic: prev.pic !== undefined ? prev.pic : (d.profile.pic || ''),
+              joined: prev.joined, fr: prev.fr, on: prev.on,
+              at: prev.at || d.updatedAt || Date.now() } };
+          });
+        }
+      }
       return;
     }
     m = topic.match(/^splidchat\/v1\/dir\/([A-Z0-9]+)$/);
@@ -3946,7 +3988,7 @@ function App() {
       chatSubsRef.current.add(cTopic('profile', me2.id));
       chatSubsRef.current.add(cTopic('removed', me2.id)); /* our own tombstone — lands instantly if the owner removed this ID */
       chatSubsRef.current.add(BROADCAST_TOPIC);          /* owner announcements reach every signed-in app */
-      if (normId(me2.id) === CREATOR_ID) { chatSubsRef.current.add(DIR_WILD); chatSubsRef.current.add(REMOVED_WILD); } /* owner only: live directory + removal feeds */
+      if (normId(me2.id) === CREATOR_ID) { chatSubsRef.current.add(DIR_WILD); chatSubsRef.current.add(REMOVED_WILD); chatSubsRef.current.add(PROFILE_WILD); } /* owner only: live directory + removal feeds + every profile, so the registry stays complete */
       Object.keys(chatRef.current.friends || {}).forEach(f => { chatSubsRef.current.add(cTopic('presence', f)); chatSubsRef.current.add(cTopic('profile', f)); });
       chatSubsRef.current.forEach(t => { try { c.subscribe(t, { qos: 0 }); } catch (e) {} });
       chatPublish(cTopic('presence', me2.id), { app:'splidchat', on: 1, t: Date.now() }, true);
