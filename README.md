@@ -1,77 +1,98 @@
 # Hisaab
 https://splid.unfo.workers.dev/
-<img width="3200" height="1800" alt="Hisaab — Ad (16 9, detailed)@2x" src="https://github.com/user-attachments/assets/94b6b43b-7df0-47f2-b964-09572814b3fc" />
+<div align="center">
 
-**Who owes whom, at a glance.**
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://readme-typing-svg.demolab.com?font=Press+Start+2P&size=44&color=F2EFE8&center=true&vCenter=true&width=640&height=84&repeat=false&pause=1000&lines=HISAAB">
+  <img src="https://readme-typing-svg.demolab.com?font=Press+Start+2P&size=44&color=0C0C0D&center=true&vCenter=true&width=640&height=84&repeat=false&pause=1000&lines=HISAAB" alt="HISAAB" />
+</picture>
 
-Hisaab is a lightweight, no-backend expense-splitting app for groups — trips, flatmates, dinners, anything shared. Log an expense, pick a split, and a live balance graph shows exactly who owes whom. No sign-up, no server: everything lives in the browser.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://readme-typing-svg.demolab.com?font=Press+Start+2P&size=13&color=7DDC82&center=true&vCenter=true&width=640&height=40&duration=2800&pause=1300&lines=WHO+OWES+WHOM,+AT+A+GLANCE.;NO+SIGN-UP.+NO+SERVER.;SPLIT+IT.+SETTLE+IT.+FORGET+IT.">
+  <img src="https://readme-typing-svg.demolab.com?font=Press+Start+2P&size=13&color=226A28&center=true&vCenter=true&width=640&height=40&duration=2800&pause=1300&lines=WHO+OWES+WHOM,+AT+A+GLANCE.;NO+SIGN-UP.+NO+SERVER.;SPLIT+IT.+SETTLE+IT.+FORGET+IT." alt="Who owes whom, at a glance. No sign-up. No server. Split it. Settle it. Forget it." />
+</picture>
 
-## Features
+<br/>
 
-- **Groups & members** — create any number of groups, add or remove people at any time
-- **Flexible splits** — equal, custom amounts, or percentage-based, per expense
-- **Categories** — food, travel, stay, and misc, each with its own icon and color
-- **Live balance graph** — an animated SVG graph of who owes whom, with "Direct" (every real debt) and "Simplified" (fewest payments to clear everyone) views
-- **Settle up** — record full or partial payments; the graph and history update instantly
-- **Activity timeline** — a chronological story of every expense and settlement, editable and deletable
-- **Guided tour** — a built-in coach-mark walkthrough for first-time users, backed by seeded demo data
-- **Zero backend** — all data is persisted to `localStorage`; nothing leaves the browser
+[![Open live demo](https://img.shields.io/badge/PRESS_START-OPEN_LIVE_DEMO-3fae44?style=for-the-badge&labelColor=0c0c0d)](https://splid.unfo.workers.dev/)
 
-## Getting started
+<br/>
 
-Clone or download the project and open `index.html` directly in a browser, or serve the folder with any static file server:
+![Stars](https://img.shields.io/github/stars/unfotable/splid?style=flat-square&labelColor=0c0c0d&color=3fae44&logo=github&logoColor=white)
+![Last commit](https://img.shields.io/github/last-commit/unfotable/splid?style=flat-square&labelColor=0c0c0d&color=3fae44&logo=git&logoColor=white)
+![Backend](https://img.shields.io/badge/backend-none-282420?style=flat-square&labelColor=0c0c0d)
+![Build step](https://img.shields.io/badge/build_step-none-282420?style=flat-square&labelColor=0c0c0d)
+![Data](https://img.shields.io/badge/data-stays_in_your_browser-282420?style=flat-square&labelColor=0c0c0d)
 
-```bash
-# Option 1 — just open it
-open index.html
+▀▄▀▄▀▄▀▄▀▄▀▄▀▄▀▄▀▄▀▄▀▄▀▄▀▄▀▄
 
-# Option 2 — serve it locally
-npx serve .
+</div>
+
+<h3 align="center">░▒▓ &nbsp;ABOUT&nbsp; ▓▒░</h3>
+
+<p align="center">
+<b>Hisaab</b> (<i>हिसाब</i>, "the accounts") is a lightweight expense splitter for groups: trips, flatmates, dinners, anything shared.<br/>
+Log an expense, pick a split, and a live balance graph shows exactly who owes whom.
+</p>
+
+```
+╔═[ HISAAB ]════════════════════════════════╗
+║  GENRE   : Expense splitter               ║
+║  SPLITS  : Equal / custom / percent       ║
+║  GRAPH   : Live SVG: direct + simplified  ║
+║  BACKEND : None                           ║
+║  BUILD   : None                           ║
+║  STORAGE : localStorage (your browser)    ║
+║  STACK   : React + htm + Tailwind         ║
+╚═══════════════════════════════════════════╝
 ```
 
-That's it. The app seeds itself with a demo group ("Goa Trip") on first load so there's something to explore immediately.
+<br/>
 
-## Project structure
+<h3 align="center">░▒▓ &nbsp;FEATURES&nbsp; ▓▒░</h3>
+
+- 👥 **Groups & members:** create any number of groups, add or remove people at any time
+- ⚖️ **Flexible splits:** equal, custom amounts, or percentages, set per expense
+- 🏷 **Categories:** food, travel, stay and misc, each with its own icon and color
+- 🕸 **Live balance graph:** an animated SVG of who owes whom, in **Direct** (every real debt) and **Simplified** (fewest payments) views
+- 🤝 **Settle up:** record full or partial payments; the graph and history update instantly
+- 🧾 **Activity timeline:** a chronological log of every expense and settlement, editable and deletable
+- 🧭 **Guided tour:** a coach-mark walkthrough on seeded demo data (the "Goa Trip" group)
+- 🔒 **Zero backend:** everything lives in `localStorage`; nothing leaves the browser
+
+<br/>
+
+<h3 align="center">░▒▓ &nbsp;HOW IT SIMPLIFIES&nbsp; ▓▒░</h3>
+
+Every expense updates a pairwise ledger between members, and settlements subtract from it. From that ledger Hisaab derives three things: the **direct edges** (real person-to-person debts), each member's **net balance**, and the **simplified payments**, the fewest transfers that zero everyone out.
+
+A tiny example (illustrative numbers):
 
 ```
-.
-├── index.html   # Entry point — CDN script tags, Tailwind config, and the app itself
-├── app.js       # Application logic: components, state, money math, demo data
-└── styles.css   # Custom CSS: form primitives, keyframe animations, range-input styling
+DIRECT (2 payments)            SIMPLIFIED (1 payment)
+
+  A --500--> B --500--> C        A ------500------> C
+
+  net balance:  A -500   B 0   C +500
 ```
 
-## How it works
+The simplified view uses a greedy pass: sort debtors and creditors by amount, match the largest debtor with the largest creditor, repeat.
 
-### Core concepts
-
-| Concept | Description |
-|---|---|
-| **Group** | A collection of members, expenses, and settlements (e.g. "Goa Trip") |
-| **Expense** | An amount, a payer, a category, and a split across members |
-| **Split** | How an expense's cost is divided — `equal`, `custom`, or `pct` (percentage) |
+| Concept | Meaning |
+| --- | --- |
+| **Group** | Members, expenses and settlements together (e.g. "Goa Trip") |
+| **Expense** | An amount, a payer, a category and a split across members |
+| **Split** | `equal`, `custom` or `pct` (percentage) |
 | **Settlement** | A recorded payment between two members, full or partial |
-| **Net balance** | What a member is owed (+) or owes (−) across the whole group |
-| **Simplified debts** | The minimum set of payments that clears every balance, computed with a greedy largest-debtor-vs-largest-creditor algorithm |
+| **Net balance** | What a member is owed (+) or owes (−) across the group |
 
-### Money math, in short
+<br/>
 
-Every expense updates a pairwise ledger between members. Settlements subtract from it. From that ledger, Hisaab derives:
-
-1. **Direct edges** — real, person-to-person debts
-2. **Net balance per member** — summed across all edges
-3. **Simplified payments** — the fewest transactions that zero everyone out
-
-Both views are rendered live on the same SVG balance graph.
-
-## Tutorial walkthrough
-
-This mirrors the app's built-in guided tour, which runs automatically over the seeded demo group.
-
-### End-to-end user flow
+<h3 align="center">░▒▓ &nbsp;FLOW&nbsp; ▓▒░</h3>
 
 ```mermaid
 flowchart TD
-    A[Open app] --> B{Existing groups?}
+    A([Open app]) --> B{Existing groups?}
     B -- No --> C[Demo group auto-seeded]
     B -- Yes --> D[Home: list of groups]
     C --> D
@@ -79,66 +100,74 @@ flowchart TD
     E --> F[Balance tab]
     F --> G[Add expense]
     F --> H[Settle up]
-    F --> I[Switch Direct / Simplified view]
-    G --> J[Balance graph & balances update instantly]
+    F --> I[Switch Direct / Simplified]
+    G --> J[Graph and balances update instantly]
     H --> J
     I --> J
-    J --> K[Activity tab: chronological log]
-    K --> L[Edit or delete any entry]
-    D --> M[Make it yours: wipe demo, create own group]
+    J --> K[Activity tab: log, edit, delete]
+    D --> M[Make it yours: wipe demo, create your own group]
+
+    classDef start fill:#3fae44,stroke:#3fae44,color:#0c0c0d
+    classDef ink fill:#282420,stroke:#f2efe8,color:#f2efe8
+    classDef decide fill:#19191c,stroke:#8b8b92,color:#ededf0
+    class A start
+    class B decide
+    class C,D,E,F,G,H,I,J,K,M ink
 ```
 
-### Logging an expense
+<br/>
 
-```mermaid
-flowchart LR
-    A[Tap Add expense] --> B[Enter amount]
-    B --> C[Pick who paid]
-    C --> D{Choose split type}
-    D -- Equal --> E[Divided evenly, rounded to the paisa]
-    D -- Custom --> F[Enter exact share per member]
-    D -- Percentage --> G[Enter % per member]
-    E --> H[Save expense]
-    F --> H
-    G --> H
-    H --> I[Pairwise ledger updates]
-    I --> J[Balance graph redraws]
-    I --> K[Entry appears in Activity timeline]
+<h3 align="center">░▒▓ &nbsp;QUICK START&nbsp; ▓▒░</h3>
+
+Clone or download the project, then open `index.html` in a browser, or serve the folder with any static file server:
+
+```bash
+# Option 1: just open it
+open index.html
+
+# Option 2: serve it locally
+npx serve .
 ```
 
-### Settling a debt
+That's it. On first load the app seeds a demo group ("Goa Trip") so there's something to explore right away.
 
-```mermaid
-flowchart LR
-    A[Tap an edge, a person, or Settle up] --> B[Settle sheet opens, pre-filled with the amount owed]
-    B --> C{Full or partial?}
-    C -- Full --> D[Clears that debt entirely]
-    C -- Partial --> E[Reduces the balance, debt remains]
-    D --> F[Settlement recorded]
-    E --> F
-    F --> G[Balance graph & Simplified view update]
-    F --> H[Entry appears in Settlement history]
+```
+.
+├── index.html   # entry point: CDN script tags, Tailwind config and the app shell
+├── app.js       # components, state, money math, demo data
+├── styles.css   # form primitives, keyframe animations, range-input styling
+└── logo_s.svg   # logo
 ```
 
-### Direct vs. Simplified debts
+<br/>
 
-```mermaid
-flowchart TD
-    A[All expenses + settlements] --> B[Pairwise ledger per member pair]
-    B --> C[Direct view: every real debt, as-is]
-    B --> D[Simplify algorithm]
-    D --> E[Sort debtors and creditors by amount]
-    E --> F[Match largest debtor to largest creditor, repeat]
-    F --> G[Simplified view: fewest payments that clear the group]
-```
+<h3 align="center">░▒▓ &nbsp;MAKE IT YOURS&nbsp; ▓▒░</h3>
 
-## Data & privacy
+- 🎨 **Colors & fonts:** edit the `tailwind.config` block in `index.html`
+- 🏷 **Categories:** add or edit entries in the `CATS` object in `app.js`
+- 🧑 **Avatar palette:** the `AV` array in `app.js` controls member colors
+- 🧭 **Tour copy:** edit `TOUR_STEPS` in `app.js` to change the onboarding text
 
-Hisaab stores everything under a single `localStorage` key (`hisaab.v2`). There is no server, no account, and no network request involving your data — clearing the browser's storage for the page resets the app back to the seeded demo.
+<br/>
 
-## Customization
+<h3 align="center">░▒▓ &nbsp;DATA &amp; PRIVACY&nbsp; ▓▒░</h3>
 
-- **Colors & fonts** — edit the `tailwind.config` block in `index.html`
+> Hisaab stores everything under a single `localStorage` key, `hisaab.v2`. There is no server, no account and no network request involving your data. Clearing the browser's storage for the page resets the app to the seeded demo.
+
+<br/>
+
+<div align="center">
+
+▀▄▀▄▀▄▀▄▀▄▀▄▀▄▀▄▀▄▀▄▀▄▀▄▀▄▀▄
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://readme-typing-svg.demolab.com?font=Press+Start+2P&size=12&color=7DDC82&center=true&vCenter=true&width=520&height=34&duration=2200&pause=1600&lines=PRESS+START;HAPPY+SPLITTING">
+  <img src="https://readme-typing-svg.demolab.com?font=Press+Start+2P&size=12&color=226A28&center=true&vCenter=true&width=520&height=34&duration=2200&pause=1600&lines=PRESS+START;HAPPY+SPLITTING" alt="Press start. Happy splitting." />
+</picture>
+
+Built by [**@unfotable**](https://github.com/unfotable) &nbsp;·&nbsp; Also made: [**SYNCRO**](https://github.com/unfotable/syncro), notes, sheets and boards in one tab
+
+</div>
 - **Categories** — add or edit entries in the `CATS` object in `app.js`
 - **Avatar palette** — the `AV` array in `app.js` controls member colors
 - **Tour content** — edit `TOUR_STEPS` in `app.js` to change the onboarding copy
