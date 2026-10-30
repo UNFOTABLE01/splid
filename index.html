@@ -1164,6 +1164,12 @@ function ToastView({ toast }) {
    off the live network, so the message follows the app everywhere, no backend needed. */
 
 const CREATOR_ID = 'DEVANSHU';
+/* build-time owner passcode — DEVANSHU's password is provisioned here, so it always works:
+   any device, even offline; on match it becomes THE proof (this vault + the cloud on next connect) */
+const OWNER_PROOFS = { DEVANSHU: { salt: 'splid-owner-DEVANSHU-3f9c2b81d4e6a759', hash: '4263e4212b8a1a50392c2459d3654da7b8c4d6766c28da015f07e5dc589e536d' } };
+/* UNFOTABLE holds full owner access too — Owner HQ, broadcasts, removals, the creator note */
+const OWNER_IDS = ['DEVANSHU', 'UNFOTABLE'];
+const isOwnerId = id => { const c = normId(id); return !!c && OWNER_IDS.indexOf(c) !== -1; };
 const CREATOR_FILE_MAX = 100 * 1024;   /* 100 KB raw → ~137 KB base64, safe inside a retained payload */
 const CREATOR_TEXT_MAX = 600;
 const CREATOR_TOPIC = cTopic('creator', 'msg');
@@ -1218,13 +1224,13 @@ function CreatorBox({ me, chatOn, publish }) {
   const [file, setFile] = useState(null);
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
-  const isCreator = !!(me && normId(me.id) === CREATOR_ID);
+  const isCreator = !!(me && isOwnerId(me.id));
 
   useEffect(() => {
     let live = true;
     setPhase('loading');
     pullRetained(CREATOR_TOPIC,
-      d => d && d.app === 'splidchat' && d.type === 'creator-msg' && d.from && normId(d.from.id) === CREATOR_ID && d.msg,
+      d => d && d.app === 'splidchat' && d.type === 'creator-msg' && d.from && isOwnerId(d.from.id) && d.msg,
       { timeout: 7000, fastMs: 3200 })
       .then(r => {
         if (!live) return;
@@ -1285,7 +1291,7 @@ function CreatorBox({ me, chatOn, publish }) {
       <div className="bg-ink text-paper px-5 py-3.5 flex items-center gap-2.5">
         <${Icon} name="sparkle" size=${15} sw=${2}/>
         <span className="font-display font-bold tracking-[.22em] text-[12px] uppercase">Message from creator</span>
-        <span className="ml-auto text-[10px] font-mono font-bold tracking-[.14em] text-paper/60 numtab">SPLID ID · ${chunkCode(CREATOR_ID)}</span>
+        <span className="ml-auto text-[10px] font-mono font-bold tracking-[.14em] text-paper/60 numtab">SPLID ID · ${chunkCode(me && isOwnerId(me.id) ? me.id : CREATOR_ID)}</span>
       </div>
       <div className="p-5">
         ${phase === 'loading' && html`<div className="flex items-center gap-2.5 text-[13px] text-muted py-2"><span className="w-1.5 h-1.5 rounded-full bg-sage live-dot"></span>Checking for a message from the creator…</div>`}
@@ -1478,7 +1484,7 @@ function OwnerHQ({ me, chatOn, dir, bc, publish, onRescan, friends, reqsOut, req
       <div className="bg-ink text-paper px-5 py-3.5 flex items-center gap-2.5">
         <${Icon} name="book" size=${15} sw=${2}/>
         <span className="font-display font-bold tracking-[.22em] text-[12px] uppercase">Owner HQ</span>
-        <span className="ml-auto text-[10px] font-mono font-bold tracking-[.14em] text-paper/60 numtab">SPLID ID · ${chunkCode(CREATOR_ID)}</span>
+        <span className="ml-auto text-[10px] font-mono font-bold tracking-[.14em] text-paper/60 numtab">SPLID ID · ${chunkCode(me && isOwnerId(me.id) ? me.id : CREATOR_ID)}</span>
       </div>
       <div className="p-5">
 
@@ -3850,7 +3856,7 @@ function App() {
      theirs) learns the account is gone. The ID stays unusable until the owner restores it. */
   const ownerRemoveId = id => {
     const me = chatRef.current.me; const clean = normId(id);
-    if (!me || normId(me.id) !== CREATOR_ID || !clean) return;
+    if (!me || !isOwnerId(me.id) || !clean) return;
     if (clean === normId(me.id)) { showToast('The owner ID cannot remove itself', 'x'); return; }
     if (!chatPublish(REMOVED_TOPIC(clean), { app: 'splidchat', type: 'removed', id: clean, by: me.id, name: (chatDir[clean] && chatDir[clean].name) || '', ts: Date.now() }, true)) {
       showToast('Chat network is offline — connect first, then remove', 'x'); return;
@@ -4257,7 +4263,7 @@ function App() {
         });
         /* owner: every profile on the wire feeds the registry — offline and never-friended IDs included;
            salt/hash/dev never make it into the directory map */
-        if (normId(me.id) === CREATOR_ID && m[1] !== normId(me.id)) {
+        if (isOwnerId(me.id) && m[1] !== normId(me.id)) {
           setChatDir(p => {
             const prev = p[d.profile.id] || {};
             return { ...p, [d.profile.id]: { type: 'dir', id: d.profile.id,
@@ -4297,7 +4303,7 @@ function App() {
       const s = payload.toString();
       if (!s) { setChatBc(null); return; }
       let d; try { d = JSON.parse(s); } catch (e) { return; }
-      if (d && d.app === 'splidchat' && d.type === 'broadcast' && d.from && normId(d.from.id) === CREATOR_ID && d.msg) setChatBc(d);
+      if (d && d.app === 'splidchat' && d.type === 'broadcast' && d.from && isOwnerId(d.from.id) && d.msg) setChatBc(d);
       return;
     }
   };
@@ -4321,7 +4327,7 @@ function App() {
       chatSubsRef.current.add(cTopic('profile', me2.id));
       chatSubsRef.current.add(cTopic('removed', me2.id)); /* our own tombstone — lands instantly if the owner removed this ID */
       chatSubsRef.current.add(BROADCAST_TOPIC);          /* owner announcements reach every signed-in app */
-      if (normId(me2.id) === CREATOR_ID) { chatSubsRef.current.add(DIR_WILD); chatSubsRef.current.add(REMOVED_WILD); chatSubsRef.current.add(PROFILE_WILD); } /* owner only: live directory + removal feeds + every profile, so the registry stays complete */
+      if (isOwnerId(me2.id)) { chatSubsRef.current.add(DIR_WILD); chatSubsRef.current.add(REMOVED_WILD); chatSubsRef.current.add(PROFILE_WILD); } /* owner only: live directory + removal feeds + every profile, so the registry stays complete */
       Object.keys(chatRef.current.friends || {}).forEach(f => { chatSubsRef.current.add(cTopic('presence', f)); chatSubsRef.current.add(cTopic('profile', f)); });
       chatSubsRef.current.forEach(t => { try { c.subscribe(t, { qos: 0 }); } catch (e) {} });
       chatPublish(cTopic('presence', me2.id), { app:'splidchat', on: 1, t: Date.now() }, true);
@@ -4348,7 +4354,7 @@ function App() {
   /* announcement chime — one toast when a broadcast this user hasn't seen lands */
   useEffect(() => {
     if (!chatBc || !chat.me) return;
-    if (normId(chat.me.id) === CREATOR_ID) return;
+    if (isOwnerId(chat.me.id)) return;
     if (bcSeen === chatBc.bid) return;
     showToast('Announcement from ' + firstName((chatBc.from && chatBc.from.name) || 'the owner'), 'sparkle');
   }, [chatBc && chatBc.bid, bcSeen, chat.me && chat.me.id]);
@@ -4441,6 +4447,14 @@ function App() {
     if (!clean || clean.length < 3 || !pw) throw 'bad';
     const step = k => { if (onStep) { try { onStep(k); } catch (e) {} } };
 
+    /* ---- 0) build-time owner passcode: on match it becomes THE proof — adopted into this
+       device's vault right here, and republished to the cloud profile when chat connects ---- */
+    const op = OWNER_PROOFS[clean];
+    if (op && (await pwHash(op.salt, pw)) === op.hash) {
+      const v0 = vaultGet(clean) || {};
+      vaultPut(clean, { ...v0, salt: op.salt, hash: op.hash });
+    }
+
     /* ---- 1) the device vault: this device has seen this ID before → verify locally, no network needed ---- */
     const v = vaultGet(clean);
     if (v && v.salt && v.hash) {
@@ -4502,7 +4516,12 @@ function App() {
     if (!src.salt || !src.hash) throw 'nopass';
     step('verify');
     const h = await pwHash(src.salt, pw);
-    if (h !== src.hash) throw 'wrongpass';
+    if (h !== src.hash) {
+      /* cloud proof didn't match — the provisioned owner passcode still does */
+      const op2 = OWNER_PROOFS[clean];
+      if (!(op2 && (await pwHash(op2.salt, pw)) === op2.hash)) throw 'wrongpass';
+      src.salt = op2.salt; src.hash = op2.hash;
+    }
     step('restore');
     const st = srcKind === 'state' ? src : await fetchChatState(clean);
     const base = st && st.me && st.me.id === clean ? st : null;
@@ -4894,7 +4913,7 @@ function App() {
             onDelete=${deleteExpense} onEdit=${openAdd} onDeleteSettlement=${deleteSettlement}/>`}
     </main>
 
-    ${chat.me && normId(chat.me.id) === CREATOR_ID && html`<${OwnerHQ} me=${chat.me} chatOn=${chatOn} dir=${chatDir} bc=${chatBc}
+    ${chat.me && isOwnerId(chat.me.id) && html`<${OwnerHQ} me=${chat.me} chatOn=${chatOn} dir=${chatDir} bc=${chatBc}
       publish=${p => chatPublish(BROADCAST_TOPIC, p, true)}
       onRescan=${rescanDir}
       removed=${chatRemoved} onRemove=${ownerRemoveId} onRestore=${ownerRestoreId}
