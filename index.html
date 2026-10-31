@@ -139,7 +139,7 @@ const html = htm.bind(React.createElement);
 /* ---------------- constants & helpers ---------------- */
 
 const KEY = 'hisaab.v4';
-const APP_VERSION = '1.7';   /* shown in App Settings; kept in step with the APK versionName */
+const APP_VERSION = '1.8';   /* shown in App Settings; kept in step with the APK versionName */
 const uid = () => Math.random().toString(36).slice(2, 10);
 const P = d => ({ t:'p', d });
 
@@ -653,6 +653,8 @@ const EMAIL_WILD = TOPIC_ROOT + 'emails/+';   /* owner live feed: every email ha
 const EMAIL_SWEEP = TOPIC_ROOT + 'emails/#';  /* owner sweep: every retained handle, offline devices included */
 const EMAILREG_KEY = 'hisaab.emailreg';       /* owner-side cache of collected email handles */
 const EMAIL_PENDING_KEY = 'hisaab.email.pending';   /* set when a handle couldn't reach the network yet */
+const JREQ_TOPIC = (id, reqId) => TOPIC_ROOT + 'jreq/' + normId(id).toLowerCase() + '/' + String(reqId || 'x').toLowerCase().replace(/[^a-z0-9]/g, '');   /* per-ID+request trip join request — the sender publishes here, the invited ID answers from App settings */
+const JREQ_WILD = id => TOPIC_ROOT + 'jreq/' + normId(id).toLowerCase() + '/+';   /* every join request addressed to this ID */
 const newChatId = () => Array.from({ length: 8 }, () => CODE_ABC[Math.floor(Math.random() * CODE_ABC.length)]).join('');
 
 /* any ID from 3 to 14 letters/numbers works — shorter or longer than 8, it registers as-is and
@@ -669,7 +671,7 @@ const idFromName = nm => {
   ];
   return pats[Math.floor(Math.random() * pats.length)]();
 };
-const freshChat = () => ({ me: null, friends: {}, reqsIn: {}, reqsOut: {}, threads: {}, unread: {}, seenUpto: {} });
+const freshChat = () => ({ me: null, friends: {}, reqsIn: {}, reqsOut: {}, threads: {}, unread: {}, seenUpto: {}, tripReqs: {}, tripReqDec: {} });
 
 /* ---------------- splid vault — the device keyring that makes sign-in instant & offline-proof ----------------
    Every ID this device has ever created or signed into keeps its password proof (salt + hash) and a full
@@ -2592,6 +2594,9 @@ function SettleSheet({ group, preset, onClose, onSave }) {
 function GroupSheet({ group, onClose, onSaveGroup, onReset, onReplayTour, isDemo, isCreate, onBill, onShare, onStopShare, onJoinOpen, onRestore, backupName }) {
   const [name, setName] = useState(isCreate ? 'My trip' : group.name);
   const [members, setMembers] = useState(isCreate ? [{ id: uid(), name: 'You', color: AV[0] }] : group.members);
+  /* adds by Splid ID travel as join requests, never as direct members — the trip lands on
+     that person's device only after they approve it in their own App settings */
+  const [pends, setPends] = useState(() => (isCreate ? [] : Object.values(group.reqPend || {})));
   const [newId, setNewId] = useState('');
   const [idBusy, setIdBusy] = useState(false);
   const [idErr, setIdErr] = useState(null);
@@ -2623,21 +2628,25 @@ function GroupSheet({ group, onClose, onSaveGroup, onReset, onReplayTour, isDemo
     setMembers(ms => [...ms, { id: uid(), name: n, color: AV[ms.length % AV.length] }]);
     setNewName('');
   };
-  /* add by Splid ID — the person's real profile is pulled from the network when it can be,
-     and the trip itself is delivered to their ID (see the live-sync publish below) */
+  /* add by Splid ID — the person's real profile is pulled from the network when it can be.
+     It is NOT added to the trip directly: a join request goes out instead, and only after the
+     person approves it in their App settings does the trip land on their device (the live-sync
+     publish below ships requests for pending IDs, invites only for real members). */
   const addById = async () => {
     const clean = normId(newId);
     if (!clean || clean.length < 3) { setIdErr('Splid IDs are 3–14 letters or numbers.'); return; }
     if (members.some(m => m.chatId === clean)) { setIdErr(clean + ' is already on the member list.'); return; }
+    if (pends.some(p => p.chatId === clean)) { setIdErr('A join request for ' + clean + ' is already waiting for approval.'); return; }
     setIdBusy(true); setIdErr(null);
     let nm = clean, col = AV[hashStr(clean) % AV.length], pic = '';
     try { const p = await fetchChatProfile(clean, 3500); if (p && p.name) { nm = p.name; col = p.color; pic = p.pic || ''; } } catch (e) {}
-    setMembers(ms => [...ms, { id: uid(), name: nm, color: col, pic, chatId: clean }]);
+    setPends(ps => [...ps, { reqId: 'tr' + uid(), chatId: clean, name: nm, color: col, pic, at: Date.now() }]);
     setNewId(''); setIdBusy(false);
     if (!isCreate && !group.shareCode) { try { await share(); } catch (e) {} }   /* live sync starts by itself */
   };
   const removeMember = id => { if (members.length > 2) setMembers(ms => ms.filter(m => m.id !== id)); };
-  const save = () => onSaveGroup({ name: name.trim() || (isCreate ? 'My trip' : group.name), members });
+  const cancelPend = reqId => setPends(ps => ps.filter(p => p.reqId !== reqId));
+  const save = () => onSaveGroup({ name: name.trim() || (isCreate ? 'My trip' : group.name), members, pends });
 
   return html`<${Sheet} title=${isCreate ? 'Make your own trip' : 'Group settings'} onClose=${onClose}
     footer=${html`<div className="shrink-0 border-t border-line px-5 py-3.5 flex gap-2 bg-card">
@@ -2663,6 +2672,19 @@ function GroupSheet({ group, onClose, onSaveGroup, onReset, onReplayTour, isDemo
             </button>
           </div>`)}
         </div>
+        ${pends.length > 0 && html`<div className="mt-2.5 space-y-1.5">
+          <div className="text-[10.5px] font-bold tracking-[.16em] uppercase text-muted">${pends.length} join request${pends.length === 1 ? '' : 's'} · waiting for approval</div>
+          ${pends.map(p => html`<div key=${p.reqId} className="flex items-center gap-2.5 bg-paper border border-line border-dashed rounded-2xl pl-2 pr-2 py-1.5">
+            <${Avatar} m=${p} size=${30}/>
+            <span className="text-[13.5px] font-semibold flex-1 truncate">${p.name}<span className="ml-1.5 text-[10px] font-mono font-bold tracking-[.08em] text-muted numtab">· ${chunkCode(p.chatId)}</span></span>
+            <span className="shrink-0 text-[10.5px] font-semibold text-muted flex items-center gap-1"><${Icon} name="clock" size=${11} sw=${2.2}/>Request sent</span>
+            <button onClick=${() => cancelPend(p.reqId)} aria-label=${'Cancel request to ' + p.name}
+              className="p-1.5 rounded-full text-muted hover:text-rust hover:bg-rust-tint transition">
+              <${Icon} name="x" size=${14}/>
+            </button>
+          </div>`)}
+          <p className="text-[11px] text-muted leading-relaxed">Added by Splid ID sends a request, not the trip — it reaches that person only after they approve it in their App settings.</p>
+        </div>`}
         <div className="mt-2 flex gap-2">
           <input className="inp flex-1" placeholder="Add someone by name…" maxLength=${24} value=${newName}
             onChange=${e => setNewName(e.target.value)}
@@ -2673,7 +2695,7 @@ function GroupSheet({ group, onClose, onSaveGroup, onReset, onReplayTour, isDemo
           </button>
         </div>
         <div className="mt-2 flex gap-2">
-          <input className="inp flex-1 font-mono font-bold tracking-[.1em] uppercase" placeholder="…or add by Splid ID — they see every expense" maxLength=${14} value=${newId}
+          <input className="inp flex-1 font-mono font-bold tracking-[.1em] uppercase" placeholder="…or add by Splid ID — they get a join request" maxLength=${14} value=${newId}
             onChange=${e => { setNewId(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '')); setIdErr(null); }}
             onKeyDown=${e => { if (e.key === 'Enter') addById(); }}/>
           <button onClick=${addById} disabled=${!newId.trim() || idBusy} aria-label="Add member by Splid ID"
@@ -2682,7 +2704,7 @@ function GroupSheet({ group, onClose, onSaveGroup, onReset, onReplayTour, isDemo
           </button>
         </div>
         ${idErr && html`<p className="text-[11.5px] text-rust-deep mt-1.5">${idErr}</p>`}
-        <p className="text-[11.5px] text-muted mt-2.5 leading-relaxed">Add by name for plain members, or by Splid ID and the whole trip lands on that person's device automatically — every expense, live both ways. Anyone who joins with the trip's code lands on this list by themselves.</p>
+        <p className="text-[11.5px] text-muted mt-2.5 leading-relaxed">Add by name for plain members. Add by Splid ID sends a join request — nothing lands on their device until they approve it in their App settings, and then every expense arrives live both ways. Anyone who joins with the trip's code lands on this list by themselves.</p>
       </div>
 
       ${!isCreate && html`
@@ -3660,7 +3682,7 @@ function ChatOverlay({ chat, api, view, setView, onClose, joinCode }) {
 
 /* ---------------- app settings · trips, light/dark, your spending, updates ---------------- */
 
-function AppSettings({ trips, theme, onTheme, email0, onEmailSave, onClose }) {
+function AppSettings({ trips, theme, onTheme, email0, onEmailSave, tripReqs, onTripAnswer, onClose }) {
   const [em, setEm] = useState(email0 || '');
   const [saved, setSaved] = useState(!!email0);
   const [sent, setSent] = useState(null);   /* null = saved before this feature; true/false = delivered / queued */
@@ -3693,13 +3715,39 @@ function AppSettings({ trips, theme, onTheme, email0, onEmailSave, onClose }) {
           <div className="text-[11px] text-muted numtab">${trips.myCount} expense${trips.myCount === 1 ? '' : 's'} you paid</div>
         </div>
       </div>
+      ${(tripReqs || []).length > 0 && html`<div className="bg-card border border-line rounded-2xl px-4 py-3.5">
+        <div className="flex items-start gap-3">
+          <span className="w-8 h-8 rounded-full bg-rust-tint text-rust-deep flex items-center justify-center shrink-0 mt-0.5"><${Icon} name="userPlus" size=${15}/></span>
+          <div className="flex-1 min-w-0">
+            <div className="text-[13.5px] font-semibold text-ink">Trip requests · ${(tripReqs || []).length}</div>
+            <div className="text-[11.5px] text-muted mt-0.5 leading-relaxed">People who asked to add you to their trip. Approve and the whole trip lands here, live — decline and nothing is shared.</div>
+          </div>
+        </div>
+        <div className="mt-2.5 space-y-2">
+          ${(tripReqs || []).slice().sort((a, b) => (b.at || 0) - (a.at || 0)).map(r => html`<div key=${r.reqId} className="bg-paper border border-line rounded-xl px-3 py-2.5">
+            <div className="flex items-center gap-2.5">
+              <${Avatar} m=${{ name: (r.from && (r.from.name || r.from.id)) || '?', color: (r.from && r.from.color) || AV[3], pic: r.from && r.from.pic }} size=${28}/>
+              <div className="flex-1 min-w-0">
+                <div className="text-[12.5px] font-semibold text-ink truncate">${r.tripName || 'A trip'}</div>
+                <div className="text-[11px] text-muted truncate">from ${(r.from && (r.from.name || r.from.id)) || '?'}${r.from && r.from.id ? html` <span className="text-[9.5px] font-mono font-bold tracking-[.08em] numtab">· ${chunkCode(r.from.id)}</span>` : null}</div>
+              </div>
+            </div>
+            <div className="flex gap-2 mt-2">
+              <button onClick=${() => onTripAnswer && onTripAnswer(r, false)}
+                className="flex-1 rounded-full border border-line px-3 py-1.5 text-[12px] font-semibold text-muted hover:border-muted transition">Decline</button>
+              <button onClick=${() => onTripAnswer && onTripAnswer(r, true)}
+                className="flex-1 rounded-full bg-ink text-paper px-3 py-1.5 text-[12px] font-semibold hover:bg-ink/90 active:scale-95 transition">Approve & join</button>
+            </div>
+          </div>`)}
+        </div>
+      </div>`}
       <${Row} icon="moon" title="Appearance" sub="Light is the classic warm paper look \u2014 dark keeps the same brand, easy on the eyes at night.">
         <div className="theme-seg">
           <button className=${theme === 'light' ? 'on' : ''} onClick=${() => onTheme('light')}><${Icon} name="sun" size=${14}/>Light</button>
           <button className=${theme === 'dark' ? 'on' : ''} onClick=${() => onTheme('dark')}><${Icon} name="moon" size=${14}/>Dark</button>
         </div>
       <//>
-      <${Row} icon="mail" title="Email for updates & more" sub=${saved ? 'Saved on this device \u2014 and delivered to DEVANSHU, the owner ID, over the Splid network.' : 'Leave your email and you\u2019ll hear about every big Splid update, feature and surprise first. It lands with DEVANSHU, the owner ID, so the updates actually reach you.'}>
+      <${Row} icon="mail" title="Email for updates & more" sub=${saved ? 'Saved on this device \u2014 you\u2019ll hear about every big Splid update first.' : 'Leave your email and you\u2019ll hear about every big Splid update, feature and surprise first.'}>
         <div className="flex gap-2">
           <input className="inp flex-1" type="email" inputMode="email" placeholder="you@example.com" value=${em}
             onChange=${e => { setEm(e.target.value); setSaved(false); setErr(null); }}
@@ -3708,7 +3756,7 @@ function AppSettings({ trips, theme, onTheme, email0, onEmailSave, onClose }) {
             className="shrink-0 rounded-xl bg-ink text-paper text-[12.5px] font-bold px-4 hover:bg-ink/90 active:scale-95 transition disabled:opacity-40">${saved ? 'Saved \u2713' : 'Save'}</button>
         </div>
         ${err && html`<p className="text-[11.5px] text-rust-deep mt-1.5">${err}</p>`}
-        ${saved && html`<p className="text-[11.5px] font-semibold mt-1.5 ${sent === false ? 'text-muted' : 'text-sage-deep'}">${sent === false ? 'Saved ✓ — it will be delivered to DEVANSHU, the owner ID, the next time Splid connects.' : 'Saved ✓ — delivered to DEVANSHU, the owner ID.'}</p>`}
+        ${saved && html`<p className="text-[11.5px] font-semibold mt-1.5 ${sent === false ? 'text-muted' : 'text-sage-deep'}">${sent === false ? 'Saved ✓ — it will go out the next time Splid connects.' : 'Saved ✓'}</p>`}
       <//>
       <p className="text-[11px] text-muted/80 text-center leading-relaxed pt-1">
         Splid ${APP_VERSION} · developed & managed by UNFOTABLE — <a href="https://acebydev.unfo.workers.dev/" target="_blank" rel="noopener noreferrer" className="text-ink font-semibold underline underline-offset-2">acebydev.unfo.workers.dev</a>
@@ -3718,7 +3766,7 @@ function AppSettings({ trips, theme, onTheme, email0, onEmailSave, onClose }) {
 }
 /* ---------------- chrome: header & bottom nav ---------------- */
 
-function Header({ group, total, demo, onSettings, onAppSet, liveOn, onChat, chatUnread, chatMe }) {
+function Header({ group, total, demo, onSettings, onAppSet, liveOn, onChat, chatUnread, chatMe, reqN }) {
   return html`<header className="sticky top-0 z-40 bg-paper/85 backdrop-blur-md border-b border-line">
     <div className="max-w-3xl mx-auto px-4 sm:px-6 h-[60px] flex items-center gap-3">
       <span className="inline-flex items-baseline rounded-lg bg-ink pl-2.5 pr-2 py-[7px] shrink-0 shadow-soft" aria-label="Splid logo">
@@ -3746,8 +3794,9 @@ function Header({ group, total, demo, onSettings, onAppSet, liveOn, onChat, chat
         ${chatUnread > 0 && html`<span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-rust text-paper text-[9px] font-bold flex items-center justify-center numtab border-2 border-paper">${chatUnread > 9 ? '9+' : chatUnread}</span>`}
       </button>
       <button onClick=${onAppSet} aria-label="App settings" title="App settings — trips, theme, your spending, updates"
-        className="p-2 rounded-full text-muted hover:bg-card hover:text-ink transition">
+        className="relative p-2 rounded-full text-muted hover:bg-card hover:text-ink transition">
         <${Icon} name="cog" size=${18}/>
+        ${(reqN || 0) > 0 && html`<span className="absolute -top-0.5 -right-0.5 min-w-[15px] h-[15px] px-1 rounded-full bg-rust text-paper text-[8.5px] font-bold flex items-center justify-center numtab border-2 border-paper">${reqN > 9 ? '9+' : reqN}</span>`}
       </button>
       <button onClick=${onSettings} aria-label="Group settings" className="p-2 rounded-full text-muted hover:bg-card hover:text-ink transition">
         <${Icon} name="slider" size=${18}/>
@@ -3982,6 +4031,8 @@ function App() {
   /* live sync state */
   const pendingPush = useRef(false);
   const lastInvited = useRef([]);        /* chatIds the current trip was last invited to */
+  const lastReqSent = useRef({});        /* chatId -> reqId of join requests last published for the current trip */
+  const groupsRef = useRef(db.groups); groupsRef.current = db.groups;
   const inviteSeen = useRef(new Set());  /* trip invites already landed — no repeat toasts */
   const groupRef = useRef(group); groupRef.current = group;
   const deviceRef = useRef(db.deviceId); deviceRef.current = db.deviceId;
@@ -4099,6 +4150,21 @@ function App() {
     return ok ? 'sent' : 'queued';
   };
   const meCard = me => ({ id: me.id, name: me.name, color: me.color });
+  /* answer a trip join request from App Settings — the answer rides to the sender's inbox as
+     one retained message; approved trips get pushed over right after, and the retained request
+     is pulled back so it never shows again */
+  const answerTripReq = (req, ok) => {
+    const me = chatRef.current.me; if (!me || !req || !req.reqId || !req.from || !req.from.id) return;
+    chatPublish(cTopic('inbox', req.from.id, ok ? 'tripacc' : 'tripdec', req.reqId), { app: 'splidchat', type: ok ? 'trip-acc' : 'trip-dec', reqId: req.reqId, tripId: req.tripId, by: { ...meCard(me), pic: me.pic || '' } }, true);
+    chatPublish(JREQ_TOPIC(me.id, req.reqId), null, true);
+    patchChat(c => {
+      const tr = { ...(c.tripReqs || {}) }; delete tr[req.reqId];
+      const dc = { ...(c.tripReqDec || {}) }; if (!ok) dc[req.reqId] = 1;
+      return { ...c, tripReqs: tr, tripReqDec: dc };
+    });
+    if (ok) showToast('Approved — ' + (req.tripName || 'the trip') + ' lands in a moment', 'check');
+    else showToast('Declined — nothing was shared', 'x');
+  };
 
   /* owner-directory entry — one small retained beacon per ID. on=1 while this device is live,
      refreshed by a heartbeat every 2 min; logout / tab close / account delete flip it to on=0.
@@ -4408,7 +4474,7 @@ function App() {
       let d; try { d = JSON.parse(payload.toString()); } catch (e) { return; }
       if (!d || d.app !== 'splid' || !d.tripInvite || !d.group || !d.group.shareCode || !Array.isArray(d.group.members)) return;
       if (d.updatedBy === deviceRef.current) return;
-      const g = d.group, h = hashStr(JSON.stringify(g)), gid = g.shareCode.id;
+      const g = { ...d.group, reqPend: {} }, h = hashStr(JSON.stringify(g)), gid = g.shareCode.id;   /* join requests never travel with the trip — strip any that hitched along */
       setDb(x => {
         const i = x.groups.findIndex(gr => gr && gr.shareCode && gr.shareCode.id === gid);
         if (i === 0) return x;   /* this trip is live on screen — its own topic handles updates */
@@ -4422,6 +4488,33 @@ function App() {
         setTimeout(() => showToast((g.name || 'A trip') + ' was shared with you — every expense is already in', 'sparkle'), 0);
         return { ...x, groups: [g, ...x.groups] };
       });
+      return;
+    }
+    /* trip join request — someone asked to add this ID to their trip. It never lands directly:
+       it waits in App Settings until this person approves or declines it there. */
+    const jreqRoot = TOPIC_ROOT + 'jreq/' + normId(me.id).toLowerCase() + '/';
+    if (topic.indexOf(jreqRoot) === 0) {
+      const reqId = topic.slice(jreqRoot.length);
+      const s = payload.toString();
+      if (!s || !reqId || reqId.indexOf('/') !== -1) return;
+      let d; try { d = JSON.parse(s); } catch (e) { return; }
+      if (!d || d.app !== 'splidchat' || d.type !== 'trip-req' || !d.tripId || !d.reqId || !d.from || !d.from.id) return;
+      if (normId(d.from.id) === me.id) { chatPublish(topic, null, true); return; }   /* own request echoed back */
+      if ((chatRef.current.tripReqDec || {})[d.reqId]) return;   /* already declined on this device */
+      const rid = d.reqId;
+      const already = (groupsRef.current || []).some(g => g && g.shareCode && g.shareCode.id === d.tripId);
+      if (already) {   /* trip is already on this device — answer yes by itself so the sender stops re-asking */
+        chatPublish(cTopic('inbox', d.from.id, 'tripacc', rid), { app: 'splidchat', type: 'trip-acc', reqId: rid, tripId: d.tripId, by: { ...meCard(me), pic: me.pic || '' } }, true);
+        chatPublish(topic, null, true);
+        return;
+      }
+      patchChat(c => {
+        const tr = { ...(c.tripReqs || {}) };
+        if (tr[rid]) return c;
+        tr[rid] = { reqId: rid, tripId: d.tripId, tripName: d.tripName || 'A trip', members: d.members || 0, from: d.from, at: d.at || Date.now() };
+        return { ...c, tripReqs: tr };
+      });
+      setTimeout(() => showToast((d.from.name || d.from.id) + ' sent a trip request — respond in App settings', 'users'), 0);
       return;
     }
     /* live handshake — another device is looking for MY id and the broker lost the retained copies: answer now */
@@ -4466,6 +4559,43 @@ function App() {
         if (!out) return;
         patchChat(c => { const ro = { ...(c.reqsOut || {}) }; delete ro[d.reqId]; return { ...c, reqsOut: ro }; });
         showToast((out.to.name || 'They') + ' declined your request', 'x');
+      } else if (d.type === 'trip-acc' && d.reqId && d.tripId && d.by && d.by.id) {
+        chatPublish(topic, null, true);   /* processed — drop the retained copy */
+        const cid = normId(d.by.id);
+        pendingPush.current = true;
+        setDb(x => {
+          const gi = (x.groups || []).findIndex(g => g && g.shareCode && g.shareCode.id === d.tripId);
+          if (gi < 0) return x;
+          const g = x.groups[gi];
+          const p = g.reqPend && Object.values(g.reqPend).find(pp => pp && normId(pp.chatId) === cid && (!d.reqId || pp.reqId === d.reqId));
+          if (!p) return x;
+          const rp = { ...g.reqPend }; delete rp[p.reqId];
+          const ms = g.members.some(mm => mm && mm.chatId === cid) ? g.members
+            : [...g.members, { id: uid(), name: d.by.name || p.name || cid, color: d.by.color || p.color || AV[cid.length % AV.length], pic: d.by.pic || p.pic || '', chatId: cid }];
+          const ng = { ...g, reqPend: rp, members: ms };
+          const gs = x.groups.slice(); gs[gi] = ng;
+          setTimeout(() => {   /* the person who approved gets the whole trip on their device now */
+            try { ensureLive().publish(tripInboxTopic(cid), JSON.stringify({ app: 'splid', v: 3, tripInvite: true, group: ng, updatedBy: deviceRef.current, updatedAt: Date.now() }), { qos: 0, retain: true }); } catch (e) {}
+            showToast((d.by.name || cid) + ' approved — they\u2019re on the trip now', 'check');
+          }, 0);
+          return { ...x, groups: gs };
+        });
+      } else if (d.type === 'trip-dec' && d.reqId && d.tripId && d.by && d.by.id) {
+        chatPublish(topic, null, true);
+        const cid = normId(d.by.id);
+        pendingPush.current = true;
+        setDb(x => {
+          const gi = (x.groups || []).findIndex(g => g && g.shareCode && g.shareCode.id === d.tripId);
+          if (gi < 0) return x;
+          const g = x.groups[gi];
+          const p = g.reqPend && Object.values(g.reqPend).find(pp => pp && normId(pp.chatId) === cid && (!d.reqId || pp.reqId === d.reqId));
+          if (!p) return x;
+          const nm = d.by.name || p.name || cid;
+          const rp = { ...g.reqPend }; delete rp[p.reqId];
+          const gs = x.groups.slice(); gs[gi] = { ...g, reqPend: rp };
+          setTimeout(() => showToast(nm + ' declined the trip request', 'x'), 0);
+          return { ...x, groups: gs };
+        });
       } else if (d.type === 'chat-msg' && d.from && d.from.id && d.from.id !== me.id && typeof d.text === 'string') {
         chatPublish(topic, null, true);
         const fid = d.from.id;
@@ -4639,6 +4769,7 @@ function App() {
       const me2 = chatRef.current.me; if (!me2) return;
       chatSubsRef.current.add(cTopic('inbox', me2.id, '#'));
       chatSubsRef.current.add(tripInboxTopic(me2.id));   /* trip invites from anyone who adds this ID to a trip */
+      chatSubsRef.current.add(JREQ_WILD(me2.id));   /* trip join requests addressed to this ID — answered in App settings */
       chatSubsRef.current.add(cTopic('need', me2.id)); /* live handshake listener — answers identity pings */
       chatSubsRef.current.add(cTopic('profile', me2.id));
       chatSubsRef.current.add(cTopic('removed', me2.id)); /* our own tombstone — lands instantly if the owner removed this ID */
@@ -5069,19 +5200,21 @@ function App() {
     patchGroup(g => ({ ...g, settlements: g.settlements.filter(s => s.id !== id) }));
     showToast('Settlement removed', 'trash');
   };
-  const saveGroup = ({ name, members }) => {
+  const saveGroup = ({ name, members, pends }) => {
     pendingPush.current = true;
     const creating = sheet && sheet.type === 'group' && sheet.create;
     setSheet(null); setSelected(null);
+    const reqPend = {};
+    (pends || []).forEach(p => { if (p && p.reqId && p.chatId) reqPend[p.reqId] = p; });
     if (creating) {
       setDb(d => ({ ...d, demo: false, tourDone: true, groups: [{
         id: uid(), name: name || 'My trip', color: '#4283F2',
-        members, expenses: [], settlements: [],
+        members, reqPend, expenses: [], settlements: [],
       }] }));
       showToast('Trip created — log your first expense!', 'sparkle');
       setSheet({ type: 'add' });
     } else {
-      patchGroup(g => ({ ...g, name, members }));
+      patchGroup(g => ({ ...g, name, members, reqPend }));
       showToast('Group updated');
     }
   };
@@ -5136,7 +5269,7 @@ function App() {
       if (!me || !Array.isArray(grp.members) || grp.members.some(m => m && m.chatId === normId(me.id))) return grp;
       return { ...grp, members: [...grp.members, { id: uid(), name: me.name, color: me.color, pic: me.pic || '', chatId: normId(me.id) }] };
     };
-    const withShare = stampMe({ ...g, shareCode: { id: topic, code: chunkCode(clean) } });
+    const withShare = stampMe({ ...g, reqPend: {}, shareCode: { id: topic, code: chunkCode(clean) } });
     setDb(d => ({ ...d, groups: [withShare, d.groups[0]] }));
     setSheet(null); setSelected(null); setTab('balance');
     /* write the joiner into the shared member list immediately — the broker replays the old
@@ -5196,15 +5329,30 @@ function App() {
       let live = null;
       try { live = ensureLive(); live.publish(sc.id, payload, { qos: 0, retain: true }); } catch (e) { pendingPush.current = true; }
       /* drop a retained invite into every linked member's inbox — that ID sees this trip (all
-         expenses, live sync) the moment it signs in, without ever typing a code */
+         expenses, live sync) the moment it signs in, without ever typing a code.
+         Pending join requests are different: they only get a small request message, never the
+         trip itself, until the person approves it in their own App settings. */
       try {
         if (live) {
+          const meNow = chatRef.current.me;
           const nowIds = [];
           (group.members || []).forEach(m => {
             if (!m || !m.chatId) return;
             nowIds.push(m.chatId);
             try { live.publish(tripInboxTopic(m.chatId), payload, { qos: 0, retain: true }); } catch (e) {}
           });
+          const nowReqs = {};
+          Object.values(group.reqPend || {}).forEach(p => {
+            if (!p || !p.chatId || !p.reqId || nowIds.indexOf(p.chatId) !== -1) return;
+            nowReqs[p.chatId] = p.reqId;
+            const rp = { app: 'splidchat', type: 'trip-req', reqId: p.reqId, tripId: sc.id, tripName: group.name || 'A trip', members: (group.members || []).length, at: Date.now() };
+            if (meNow) rp.from = { id: normId(meNow.id), name: meNow.name || '', color: meNow.color || '', pic: meNow.pic || '' };
+            try { live.publish(JREQ_TOPIC(p.chatId, p.reqId), JSON.stringify(rp), { qos: 0, retain: true }); } catch (e) {}
+          });
+          Object.keys(lastReqSent.current || {}).forEach(cid => {   /* cancelled or answered — pull the retained request back */
+            if (!nowReqs[cid]) { try { live.publish(JREQ_TOPIC(cid, lastReqSent.current[cid]), '', { qos: 0, retain: true }); } catch (e) {} }
+          });
+          lastReqSent.current = nowReqs;
           (lastInvited.current || []).forEach(cid => {
             if (nowIds.indexOf(cid) === -1) { try { live.publish(tripInboxTopic(cid), '', { qos: 0, retain: true }); } catch (e) {} }
           });
@@ -5235,7 +5383,7 @@ function App() {
 
   return html`<div className="min-h-screen dotbg text-ink font-sans antialiased flex flex-col">
     <${Header} group=${group} total=${total} demo=${db.demo} onSettings=${() => setSheet({ type:'group' })} onAppSet=${() => setAppSetOpen(true)} liveOn=${liveOn}
-      onChat=${() => { setChatView('home'); setChatOpen(true); }} chatUnread=${chatUnread} chatMe=${chat.me}/>
+      onChat=${() => { setChatView('home'); setChatOpen(true); }} chatUnread=${chatUnread} chatMe=${chat.me} reqN=${Object.values(chat.tripReqs || {}).length}/>
 
     <main className="flex-1">
       ${tab === 'balance'
@@ -5283,6 +5431,7 @@ function App() {
     ${appSetOpen && html`<${AppSettings} trips=${lifeStats} theme=${theme} onTheme=${applyTheme}
       email0=${(() => { try { return localStorage.getItem('hisaab.email') || ''; } catch (e) { return ''; } })()}
       onEmailSave=${saveUserEmail}
+      tripReqs=${Object.values(chat.tripReqs || {})} onTripAnswer=${answerTripReq}
       onClose=${() => setAppSetOpen(false)}/>`}
     <${ToastView} toast=${toast}/>
     ${tourOpen && html`<${Tour} steps=${TOUR_STEPS} onFinish=${finishTour} onFinal=${finalTour}/>`}
